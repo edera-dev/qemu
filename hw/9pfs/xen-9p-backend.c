@@ -58,6 +58,7 @@ typedef struct Xen9pfsDev {
     V9fsState state;
     char *path;
     char *security_model;
+    char *multidevs;
     char *tag;
     char *id;
 
@@ -480,6 +481,7 @@ static int xen_9pfs_connect(struct XenLegacyDevice *xendev)
     }
 
     xen_9pdev->security_model = xenstore_read_be_str(xendev, "security_model");
+    xen_9pdev->multidevs = xenstore_read_be_str(xendev, "multidevs");
     xen_9pdev->path = xenstore_read_be_str(xendev, "path");
     xen_9pdev->id = s->fsconf.fsdev_id =
         g_strdup_printf("xen9p%d", xendev->dev);
@@ -490,6 +492,9 @@ static int xen_9pfs_connect(struct XenLegacyDevice *xendev)
     qemu_opt_set(fsdev, "fsdriver", "local", NULL);
     qemu_opt_set(fsdev, "path", xen_9pdev->path, NULL);
     qemu_opt_set(fsdev, "security_model", xen_9pdev->security_model, NULL);
+    if (xen_9pdev->multidevs) {
+        qemu_opt_set(fsdev, "multidevs", xen_9pdev->multidevs, NULL);
+    }
     qemu_opts_set_id(fsdev, strdup(s->fsconf.fsdev_id));
     qemu_fsdev_add(fsdev, &err);
     if (err) {
