@@ -110,6 +110,20 @@ int qemu_ram_get_fd(RAMBlock *rb);
 size_t qemu_ram_pagesize(RAMBlock *block);
 size_t qemu_ram_pagesize_largest(void);
 
+uint32_t ldub_xenpv(hwaddr addr);
+uint32_t lduw_xenpv(hwaddr addr);
+uint32_t ldl_xenpv(hwaddr addr);
+uint64_t ldq_xenpv(hwaddr addr);
+void stb_xenpv(hwaddr addr, uint32_t val);
+void stw_xenpv(hwaddr addr, uint32_t val);
+void stl_xenpv(hwaddr addr, uint32_t val);
+void stq_xenpv(hwaddr addr, uint64_t val);
+
+void *xenpv_map_iov(hwaddr addr,
+                    hwaddr *len,
+                    int is_write);
+void xenpv_unmap_iov(void *addr, hwaddr size);
+
 /**
  * cpu_address_space_init:
  * @cpu: CPU to add this address space to
