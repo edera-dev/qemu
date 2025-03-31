@@ -1291,6 +1291,7 @@ static const TypeInfo virtio_ccw_bus_info = {
 
 static void virtio_ccw_register(void)
 {
+    printf("%s\n", __func__);
     type_register_static(&virtio_ccw_bus_info);
     type_register_static(&virtio_ccw_device_info);
 }

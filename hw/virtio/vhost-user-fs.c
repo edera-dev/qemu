@@ -438,6 +438,8 @@ static void vuf_class_init(ObjectClass *klass, void *data)
     vdc->get_vhost = vuf_get_vhost;
 }
 
+// NOTE: this is created when user creates vhost-user-fs-device on the command line
+// but it uses the virtio bus, not xen-bus
 static const TypeInfo vuf_info = {
     .name = TYPE_VHOST_USER_FS,
     .parent = TYPE_VIRTIO_DEVICE,

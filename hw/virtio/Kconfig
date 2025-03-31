@@ -21,6 +21,13 @@ config VIRTIO_MMIO
     bool
     select VIRTIO
 
+config VIRTIO_XEN
+    bool
+    default y
+    select VIRTIO
+    select XEN
+    select XEN_BUS
+
 config VIRTIO_CCW
     bool
     select VIRTIO
