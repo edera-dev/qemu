@@ -37,32 +37,62 @@
 #include "trace.h"
 #include "qemu/qemu-print.h"
 
+#define UNUSED __attribute__((__unused__))
+
 static void virtio_xen_bus_new(VirtioBusState *, size_t, VirtioXenDevice *);
 static void virtio_xen_device_realize(VirtioXenDevice *, Error **);
 
-/* virtio-xen */
+/* virtio-xen-device */
 
-static void virtio_xen_busdev_realize(DeviceState *dev, Error **errp)
+static void UNUSED virtio_xen_busdev_realize(DeviceState *dev, Error **errp)
 {
-    QPRINT; // TODO:
-    VirtioXenDevice *_dev = (VirtioXenDevice *)dev;
+    VUF_DBG("enter");
+    XenDevice *xd = (XenDevice *)dev;
+    VirtioXenDevice *vxd = (VirtioXenDevice *)xd;
 
-    virtio_xen_bus_new(&_dev->bus, sizeof(_dev->bus), _dev);
-    virtio_xen_device_realize(_dev, errp);
+    virtio_xen_bus_new(&vxd->bus, sizeof(vxd->bus), vxd);
+    virtio_xen_device_realize(vxd, errp);
 }
 
-static void virtio_xen_device_class_init(ObjectClass *klass, void *data)
+static void UNUSED xen_device_class_realize(XenDevice *xendev, Error **errp)
 {
-    QPRINT;
+    VUF_DBG("enter. tbd");
+}
 
-    DeviceClass *dc = DEVICE_CLASS(klass);
-    //XenDeviceClass *k = XEN_DEVICE_CLASS(dc);
-    //VirtioXenDeviceClass *vdc = VIRTIO_XEN_DEVICE_CLASS(klass);
+static void xen_device_class_frontend_changed(XenDevice *xendev,
+                                       enum xenbus_state frontend_state,
+                                       Error **errp)
+{
+    VUF_DBG("enter. tbd");
+}
 
-    // k->unplug = virtio_ccw_busdev_unplug;
-    dc->realize = virtio_xen_busdev_realize;
-    // dc->unrealize = virtio_ccw_busdev_unrealize;
-    // device_class_set_parent_reset(dc, virtio_ccw_reset, &vdc->parent_reset);
+static void virtio_xen_device_class_init(ObjectClass *obj_class, void *data)
+{
+    VUF_DBG("enter. set up abstract xen device with realize fn");
+
+    DeviceClass *dev_class = DEVICE_CLASS(obj_class);
+    XenDeviceClass *xd_class = XEN_DEVICE_CLASS(dev_class);
+    // VirtioXenDeviceClass *vxd_class = VIRTIO_XEN_DEVICE_CLASS(obj_class);
+
+    // xd_class->unplug = virtio_ccw_busdev_unplug;
+    //dev_class->realize = virtio_xen_busdev_realize;
+    // dev_class->unrealize = virtio_ccw_busdev_unrealize;
+    // device_class_set_parent_reset(dc, virtio_ccw_reset, &vdc->parent_reset); // legacy API
+
+    // NOTE: xen_bus_backend_create identifies the following keys
+    // state, online, frontend, frontend-id, hotplug-status
+    // as use for creating a generic XenDevice, and captures any others
+
+    // run script writes state 1 for FE then BE to activate
+    // but xen_config_dev_all does this in xen/xen_devconfig.c
+
+    //xd_class->backend = "fuck";
+    //xd_class->device = "you";
+    // xd_class->get_name = xen_block_get_name;
+    // xd_class->realize = xen_device_class_realize; // lots of XS writes
+    xd_class->frontend_changed = xen_device_class_frontend_changed;
+    // xd_class->unrealize = xen_block_unrealize;
+    // device_class_set_props(dev_class, xen_block_props);
 }
 
 static const TypeInfo virtio_xen_device_info = {
@@ -71,40 +101,69 @@ static const TypeInfo virtio_xen_device_info = {
     .instance_size = sizeof(VirtioXenDevice),
     .class_init = virtio_xen_device_class_init,
     .class_size = sizeof(VirtioXenDeviceClass),
-    .abstract = true,
+    .abstract = true, // ????
 };
 
-/* virtio-xen-bus */
+/* virtio-xen-bus state */
 
-static void virtio_xen_device_realize(VirtioXenDevice *dev, Error **errp)
+// NOTE: xen_be_printf -> xen_pv_printf
+
+// NOTE: aka virtio_alloc from old code?
+static void virtio_xen_device_realize(VirtioXenDevice *vx, Error **errp)
 {
-    QPRINT; // FIXME: do it
+    VUF_DBG("enter");
 
-    VirtioXenDeviceClass *k = VIRTIO_XEN_DEVICE_GET_CLASS(dev);
-    XenDevice *xen_dev = XEN_DEVICE(dev);
-    XenDeviceClass *xk = XEN_DEVICE_GET_CLASS(xen_dev);
+    // VirtIODevice *vio_dev = NULL;
+
+    VirtioXenDeviceClass *vx_class = VIRTIO_XEN_DEVICE_GET_CLASS(vx);
+    XenDevice *xd = XEN_DEVICE(vx);
+    XenDeviceClass *xd_class = XEN_DEVICE_GET_CLASS(xd);
     Error *err = NULL;
 
+    //enum xenbus_state xb_state;
+
     // TODO: do xenbus things?
+
+    // NOTE: old code is reading items from xenstore.
+    // Perhaps [xl] writes to xenstore before launching QEMU?
+    // When you run an HVM, then QEMU must be started by something, which would
+    // be the toolstack. The MAC addr is in the domU config file, and
+    // the old QEMU code reads this from xenstore. Must be toolstack put it there.
+
+    // TODO: set host_features?
+
+    // FIXME: who writes these?
+    // VUF_DBG("XenDevice name '%s'", xd->name);
+    // VUF_DBG("XenDevice backend_path '%s'", xd->backend_path);
+    // VUF_DBG("XenDevice frontend_path '%s'", xd->frontend_path);
+    // VUF_DBG("XenDevice frontend-id %u", xd->frontend_id);
+    // VUF_DBG("xs: frontend-id = %u", xd->frontend_id);
+    //xen_device_backend_printf(xd, "frontend-id", "%d", xd->frontend_id);
 
     // NOTE: the below realize invocations invoke our
     // vhost-user-fs-xen realize callback
 
-    if (k->realize) {
+    if (xd_class->realize) {
+        qemu_printf("%s: -> XenDeviceClass::realize()\n", __func__);
+        xd_class->realize(xd, &err);
+        if (err) {
+            goto out_err;
+        }
+    } else {
+        VUF_DBG("XenDeviceClass has no realize method?");
+    }
+    if (vx_class->realize) {
         qemu_printf("%s: -> VirtioXenDeviceClass::realize()\n", __func__);
-        k->realize(dev, &err);
+        vx_class->realize(vx, &err); // -> vhost_user_fs_xen_realize
         if (err) {
             goto out_err;
         }
     }
 
-    if (xk->realize) {
-        qemu_printf("%s: -> XenDeviceClass::realize()\n", __func__);
-        xk->realize(xen_dev, &err);
-        if (err) {
-            goto out_err;
-        }
-    }
+    VUF_DBG("XenDevice name '%s'", xd->name);
+    VUF_DBG("XenDevice backend_path '%s'", xd->backend_path);
+    VUF_DBG("XenDevice frontend_path '%s'", xd->frontend_path);
+    VUF_DBG("XenDevice frontend-id %u", xd->frontend_id);
     return;
 
 out_err:
@@ -114,33 +173,60 @@ out_err:
 static void virtio_xen_bus_new(VirtioBusState *bus, size_t bus_size,
                                VirtioXenDevice *dev)
 {
-    QPRINT;
+    VUF_DBG("enter. register virtio-bus with qemu");
     DeviceState *qdev = DEVICE(dev);
     char virtio_bus_name[] = "virtio-bus";
 
     qbus_init(bus, bus_size, TYPE_VIRTIO_XEN_BUS, qdev, virtio_bus_name);
 }
 
+/* virtio-xen-bus class */
+
+// NOTE: follow from virtio-ccw for structure
 
 static void virtio_xen_notify(DeviceState *d, uint16_t vector)
 {
-    QPRINT;
-
+    NOT_IMPL;
+    // XenVirtioDev *xv_dev = opaque;
     // xc_evtchn_notify(xv_dev->notify_evtchndev, xv_dev->notify_local_port);
+}
+
+static void virtio_xen_save_config(DeviceState *d, QEMUFile *f)
+{
+    NOT_IMPL;
+    // VirtioCcwDevice *dev = VIRTIO_XEN_DEVICE(d);
+    // TODO: vmstate_save_state(f, &vmstate_virtio_xen_dev, dev, NULL);
+}
+
+static int virtio_xen_load_config(DeviceState *d, QEMUFile *f)
+{
+    NOT_IMPL;
+    // VirtioCcwDevice *dev = VIRTIO_XEN_DEVICE(d);
+    // TODO: return vmstate_load_state(f, &vmstate_virtio_ccw_dev, dev, 1);
+    return 0;
+}
+
+static void virtio_xen_save_queue(DeviceState *d, int n, QEMUFile *f)
+{
+    NOT_IMPL;
+}
+
+static int virtio_xen_load_queue(DeviceState *d, int n, QEMUFile *f)
+{
+    NOT_IMPL;
+    return 0;
 }
 
 static int virtio_xen_set_guest_notifiers(DeviceState *d, int nvqs,
                                           bool assigned)
 {
-    QPRINT; // TODO:
-
+    NOT_IMPL;
     return -EFAULT;
 }
 
-
 static void virtio_xen_bus_class_init(ObjectClass *klass, void *data)
 {
-    QPRINT;
+    VUF_DBG("enter. set up method callbacks");
 
     VirtioBusClass *k = VIRTIO_BUS_CLASS(klass);
     BusClass *bus_class = BUS_CLASS(klass);
@@ -148,14 +234,14 @@ static void virtio_xen_bus_class_init(ObjectClass *klass, void *data)
     bus_class->max_dev = 1;
 
     k->notify = virtio_xen_notify;
-    // k->save_config = virtio_xen_save_config;
-    // k->load_config = virtio_xen_load_config;
-    // k->save_queue = virtio_pci_save_queue;
-    // k->load_queue = virtio_pci_load_queue;
+    k->save_config = virtio_xen_save_config;
+    k->load_config = virtio_xen_load_config;
+    k->save_queue = virtio_xen_save_queue;
+    k->load_queue = virtio_xen_load_queue;
 
-    // k->save_extra_state = virtio_xen_save_extra_state;
-    // k->load_extra_state = virtio_xen_load_extra_state;
-    // k->has_extra_state = virtio_xen_has_extra_state;
+    // ?? k->save_extra_state = virtio_xen_save_extra_state;
+    // ?? k->load_extra_state = virtio_xen_load_extra_state;
+    // ?? k->has_extra_state = virtio_xen_has_extra_state;
     k->set_guest_notifiers = virtio_xen_set_guest_notifiers;
     // k->ioeventfd_enabled = virtio_xen_ioeventfd_enabled;
     // k->ioeventfd_assign = virtio_xen_ioeventfd_assign;

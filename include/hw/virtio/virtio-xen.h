@@ -26,7 +26,19 @@
 #include "hw/virtio/virtio-bus.h"
 #include "hw/xen/xen-bus.h"
 
-#define QPRINT qemu_printf("%s\n", __func__)
+#define VUF_DBG(fmt, ...) \
+    do { \
+        qemu_printf("%s: " fmt "\n", __func__, ## __VA_ARGS__); \
+    } while (0)
+
+#define NOT_IMPL VUF_DBG("not implemented")
+
+#define VUF_QERR(errp, fmt, ...) \
+    do { \
+        error_report(fmt ": %s" "\n", ## __VA_ARGS__, \
+                     error_get_pretty(errp)); \
+    } while (0)
+
 
 /* virtio-xen-bus */
 
@@ -52,19 +64,16 @@ struct VirtioXenDeviceClass {
 struct VirtioXenDevice {
     XenDevice parent_obj;
     VirtioBusState bus;
-};
 
-//    struct XenDevice  xendev; // hw/xen/xen-bus.h
-//    VirtIODevice     *vdev;   // hw/virtio/virtio.h
-//    uint32_t          host_features; // TODO: ?
-//
-//    // config page reference?
-//    void             *page;
-//    int               conf_page_ref;
-//
-//    // event channels?
-//    XenEvtchn         notify_evtchndev;
-//    int               notify_local_port;
-//    int               notify_remote_port;
+    VirtIODevice *vio_dev;
+    uint32_t host_features;
+
+    // TODO: Pull in items shared by guest via xenbus:
+    // void *page;
+    // int conf_page_ref;
+    // XenEvtchn notify_evtchndev;
+    // int notify_local_port;
+    // int notify_remote_port;
+};
 
 #endif

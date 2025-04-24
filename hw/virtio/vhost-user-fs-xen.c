@@ -18,8 +18,7 @@
 #include "qom/object.h"
 #include "qemu/qemu-print.h"
 #include "qapi/error.h" // error_get_*
-
-#define QPRINT qemu_printf("%s\n", __func__)
+#include "qemu/error-report.h" // error_get_*
 
 typedef struct VHostUserFSXen {
     VirtioXenDevice parent_obj;
@@ -30,30 +29,30 @@ typedef struct VHostUserFSXen {
 DECLARE_INSTANCE_CHECKER(VHostUserFSXen, VHOST_USER_FS_XEN,
                          TYPE_VHOST_USER_FS_XEN)
 
+// QEMU cmdline flags
 static Property vhost_user_fs_xen_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
 static void vhost_user_fs_xen_realize(VirtioXenDevice *xen_dev, Error **errp)
 {
-    QPRINT;
+    VUF_DBG("-> qdev_realize vdev");
 
     VHostUserFSXen *dev = VHOST_USER_FS_XEN(xen_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
 
-    // initialize and plug the device into the specified bus
     qdev_realize(vdev, BUS(&xen_dev->bus), errp);
     if (!qdev_is_realized(vdev)) {
         qemu_printf("%s: vdev not realized\n", __func__);
         if (errp)
-            qemu_printf("%s\n", error_get_pretty(*errp));
+            VUF_QERR(*errp, "");
     }
     qemu_printf("%s exit\n", __func__);
 }
 
 static void vhost_user_fs_xen_instance_init(Object *obj)
 {
-    QPRINT;
+    VUF_DBG("");
 
     VHostUserFSXen *dev = VHOST_USER_FS_XEN(obj);
     // VirtioXenDevice *xen_dev = VIRTIO_XEN_DEVICE(obj);
@@ -64,7 +63,7 @@ static void vhost_user_fs_xen_instance_init(Object *obj)
 
 static void vhost_user_fs_xen_class_init(ObjectClass *klass, void *data)
 {
-    QPRINT;
+    VUF_DBG("");
 
     DeviceClass *dc = DEVICE_CLASS(klass);
     VirtioXenDeviceClass *k = VIRTIO_XEN_DEVICE_CLASS(klass);
@@ -78,8 +77,7 @@ static const TypeInfo vhost_user_fs_xen_info = {
     .name          = TYPE_VHOST_USER_FS_XEN,
     .parent        = TYPE_VIRTIO_XEN_DEVICE,
     .instance_size = sizeof(VHostUserFSXen),
-    .instance_init = vhost_user_fs_xen_instance_init,
-    .class_init    = vhost_user_fs_xen_class_init,
+    .instance_init = vhost_user_fs_xen_instance_init, .class_init    = vhost_user_fs_xen_class_init,
 };
 
 static void vhost_user_fs_xen_register(void)

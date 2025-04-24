@@ -716,6 +716,7 @@ static bool xen_device_frontend_exists(XenDevice *xendev)
 static void xen_device_frontend_create(XenDevice *xendev, Error **errp)
 {
     ERRP_GUARD();
+    printf("!!!! %s\n", __func__);
     XenBus *xenbus = XEN_BUS(qdev_get_parent_bus(DEVICE(xendev)));
     XenDeviceClass *xendev_class = XEN_DEVICE_GET_CLASS(xendev);
 
@@ -1010,6 +1011,7 @@ static void xen_device_exit(Notifier *n, void *data)
 static void xen_device_realize(DeviceState *dev, Error **errp)
 {
     ERRP_GUARD();
+    printf("!!!! %s\n", __func__);
     XenDevice *xendev = XEN_DEVICE(dev);
     XenDeviceClass *xendev_class = XEN_DEVICE_GET_CLASS(xendev);
     XenBus *xenbus = XEN_BUS(qdev_get_parent_bus(DEVICE(xendev)));
@@ -1102,6 +1104,7 @@ static void xen_device_class_init(ObjectClass *class, void *data)
 {
     DeviceClass *dev_class = DEVICE_CLASS(class);
 
+    printf("!!!! %s\n", __func__);
     dev_class->realize = xen_device_realize;
     dev_class->unrealize = xen_device_unrealize;
     device_class_set_props(dev_class, xen_device_props);
