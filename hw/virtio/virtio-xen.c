@@ -54,16 +54,30 @@ static void UNUSED virtio_xen_busdev_realize(DeviceState *dev, Error **errp)
     virtio_xen_device_realize(vxd, errp);
 }
 
+static char *xen_device_class_get_name(XenDevice *xendev, Error **errp)
+{
+    VUF_DBG("");
+    // NOTE: convention seems to be the name ends with a numeral
+    static uint32_t num = 0;
+    return g_strdup_printf("%u", num++);
+}
+
 static void UNUSED xen_device_class_realize(XenDevice *xendev, Error **errp)
 {
-    VUF_DBG("enter. tbd");
+    VUF_DBG(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+    VUF_DBG("XenDevice name '%s'", xendev->name);
+    VUF_DBG("XenDevice backend_path '%s'", xendev->backend_path);
+    VUF_DBG("XenDevice frontend_path '%s'", xendev->frontend_path);
+    VUF_DBG("XenDevice frontend-id %u", xendev->frontend_id);
+
+    // FIXME: continue here?
 }
 
 static void xen_device_class_frontend_changed(XenDevice *xendev,
                                        enum xenbus_state frontend_state,
                                        Error **errp)
 {
-    VUF_DBG("enter. tbd");
+    VUF_DBG("frontend_state -> %u", frontend_state);
 }
 
 static void virtio_xen_device_class_init(ObjectClass *obj_class, void *data)
@@ -75,7 +89,7 @@ static void virtio_xen_device_class_init(ObjectClass *obj_class, void *data)
     // VirtioXenDeviceClass *vxd_class = VIRTIO_XEN_DEVICE_CLASS(obj_class);
 
     // xd_class->unplug = virtio_ccw_busdev_unplug;
-    //dev_class->realize = virtio_xen_busdev_realize;
+    //dev_class->realize = virtio_xen_busdev_realize; // XXX: override or not??? maybe don't touch DeviceClass!
     // dev_class->unrealize = virtio_ccw_busdev_unrealize;
     // device_class_set_parent_reset(dc, virtio_ccw_reset, &vdc->parent_reset); // legacy API
 
@@ -86,10 +100,10 @@ static void virtio_xen_device_class_init(ObjectClass *obj_class, void *data)
     // run script writes state 1 for FE then BE to activate
     // but xen_config_dev_all does this in xen/xen_devconfig.c
 
-    //xd_class->backend = "fuck";
-    //xd_class->device = "you";
-    // xd_class->get_name = xen_block_get_name;
-    // xd_class->realize = xen_device_class_realize; // lots of XS writes
+    // XXX: maybe I'm only supposed to touch my own subclass?
+
+    xd_class->get_name = xen_device_class_get_name;
+    xd_class->realize = xen_device_class_realize; // lots of XS writes
     xd_class->frontend_changed = xen_device_class_frontend_changed;
     // xd_class->unrealize = xen_block_unrealize;
     // device_class_set_props(dev_class, xen_block_props);
@@ -111,7 +125,7 @@ static const TypeInfo virtio_xen_device_info = {
 // NOTE: aka virtio_alloc from old code?
 static void virtio_xen_device_realize(VirtioXenDevice *vx, Error **errp)
 {
-    VUF_DBG("enter");
+    VUF_DBG(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
 
     // VirtIODevice *vio_dev = NULL;
 
@@ -160,10 +174,11 @@ static void virtio_xen_device_realize(VirtioXenDevice *vx, Error **errp)
         }
     }
 
-    VUF_DBG("XenDevice name '%s'", xd->name);
-    VUF_DBG("XenDevice backend_path '%s'", xd->backend_path);
-    VUF_DBG("XenDevice frontend_path '%s'", xd->frontend_path);
-    VUF_DBG("XenDevice frontend-id %u", xd->frontend_id);
+    VUF_DBG(">> XenDevice name '%s'", xd->name);
+    VUF_DBG(">> XenDevice backend_path '%s'", xd->backend_path);
+    VUF_DBG(">> XenDevice frontend_path '%s'", xd->frontend_path);
+    VUF_DBG(">> XenDevice frontend-id %u", xd->frontend_id);
+
     return;
 
 out_err:

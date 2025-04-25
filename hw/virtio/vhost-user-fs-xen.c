@@ -25,18 +25,19 @@ typedef struct VHostUserFSXen {
     VHostUserFS vdev;
 } VHostUserFSXen;
 
-#define TYPE_VHOST_USER_FS_XEN "vhost-user-fs-xen"
+//#define TYPE_VHOST_USER_FS_XEN "vhost-user-fs-xen"
+#define TYPE_VHOST_USER_FS_XEN "virtio-fs"
 DECLARE_INSTANCE_CHECKER(VHostUserFSXen, VHOST_USER_FS_XEN,
                          TYPE_VHOST_USER_FS_XEN)
 
-// QEMU cmdline flags
+// QEMU cmdline properties for this device
 static Property vhost_user_fs_xen_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
 static void vhost_user_fs_xen_realize(VirtioXenDevice *xen_dev, Error **errp)
 {
-    VUF_DBG("-> qdev_realize vdev");
+    VUF_DBG(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
 
     VHostUserFSXen *dev = VHOST_USER_FS_XEN(xen_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
