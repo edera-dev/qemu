@@ -65,8 +65,11 @@ struct VirtioXenDevice {
     XenDevice parent_obj;
     VirtioBusState bus;
 
-    VirtIODevice *vio_dev;
+    VirtIODevice *vd;
     uint32_t host_features;
+
+    uint64_t conf_evtchn, notify_evtchn;
+    uint64_t conf_mfn;
 
     // TODO: Pull in items shared by guest via xenbus:
     // void *page;
