@@ -67,20 +67,21 @@ static char *xen_device_class_get_name(XenDevice *xendev, Error **errp)
 
 static void xen_device_class_realize(XenDevice *xd, Error **errp)
 {
-    // NOTE: qemu seems to get to this fn but does not
-    // invoke my virtio_xen class methods
-
     VUF_DBG("");
 
-    // FIXME: init the bus
+    // NOTE: Here it seems we are supposed to invoke the derived class
+    // in the vhost implementation at the end of this fn.
+
     DeviceState *qdev = DEVICE(xd); // TODO: what can you pass here?
     VirtioXenDevice *vxd = (VirtioXenDevice *)xd;
+    VirtioXenDeviceClass *vxd_class = VIRTIO_XEN_DEVICE_GET_CLASS(vxd);
+
+    // Why are we initializing the bus in a device instantiation fn?
+
     char virtio_bus_name[] = "virtio-bus";
     qbus_init(&vxd->bus, sizeof(vxd->bus), TYPE_VIRTIO_XEN_BUS, qdev, virtio_bus_name);
-    VUF_DBG("virtio-bus registered");
 
-    // FIXME: invoke the subclass realize
-    VirtioXenDeviceClass *vxd_class = VIRTIO_XEN_DEVICE_GET_CLASS(vxd);
+    // Instantiate VHostUserFSXen, a subclass of us
     if (vxd_class->realize)
         vxd_class->realize(vxd, errp);
 }

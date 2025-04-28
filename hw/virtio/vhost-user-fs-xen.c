@@ -78,7 +78,8 @@ static const TypeInfo vhost_user_fs_xen_info = {
     .name          = TYPE_VHOST_USER_FS_XEN,
     .parent        = TYPE_VIRTIO_XEN_DEVICE,
     .instance_size = sizeof(VHostUserFSXen),
-    .instance_init = vhost_user_fs_xen_instance_init, .class_init    = vhost_user_fs_xen_class_init,
+    .instance_init = vhost_user_fs_xen_instance_init,
+    .class_init    = vhost_user_fs_xen_class_init,
 };
 
 static void vhost_user_fs_xen_register(void)
