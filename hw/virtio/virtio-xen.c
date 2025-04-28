@@ -41,21 +41,9 @@
 
 #define UNUSED __attribute__((__unused__))
 
-static void virtio_xen_bus_new(VirtioBusState *, size_t, VirtioXenDevice *);
 static void virtio_xen_device_realize(VirtioXenDevice *, Error **);
 
 /* virtio-xen-device */
-
-// FIXME: this needs to be called?
-static void UNUSED virtio_xen_busdev_realize(DeviceState *dev, Error **errp)
-{
-    VUF_DBG("enter");
-    XenDevice *xd = (XenDevice *)dev;
-    VirtioXenDevice *vxd = (VirtioXenDevice *)xd;
-
-    virtio_xen_bus_new(&vxd->bus, sizeof(vxd->bus), vxd);
-    virtio_xen_device_realize(vxd, errp);
-}
 
 static char *xen_device_class_get_name(XenDevice *xendev, Error **errp)
 {
@@ -245,16 +233,6 @@ static void virtio_xen_device_realize(VirtioXenDevice *vx, Error **errp)
 
 out_err:
     // TODO: bla bla bla
-}
-
-static void virtio_xen_bus_new(VirtioBusState *vbs, size_t bus_size,
-                               VirtioXenDevice *vxd)
-{
-    VUF_DBG("enter. register virtio-bus with qemu");
-    DeviceState *qdev = DEVICE(vxd);
-    char virtio_bus_name[] = "virtio-bus";
-
-    qbus_init(vbs, bus_size, TYPE_VIRTIO_XEN_BUS, qdev, virtio_bus_name);
 }
 
 /* virtio-xen-bus class */
