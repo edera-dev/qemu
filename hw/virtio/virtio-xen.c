@@ -41,7 +41,8 @@
 
 #define UNUSED __attribute__((__unused__))
 
-static void virtio_xen_device_realize(VirtioXenDevice *, Error **);
+static void virtio_xen_device_realize(XenDevice *, Error **);
+static void virtio_xen_device_unrealize(XenDevice *);
 
 /* virtio-xen-device */
 
@@ -53,32 +54,51 @@ static char *xen_device_class_get_name(XenDevice *xendev, Error **errp)
     return g_strdup_printf("%u", num++);
 }
 
-static void xen_device_class_realize(XenDevice *xd, Error **errp)
-{
-    VUF_DBG("");
-
-    // NOTE: Here it seems we are supposed to invoke the derived class
-    // in the vhost implementation at the end of this fn.
-
-    DeviceState *qdev = DEVICE(xd); // TODO: what can you pass here?
-    VirtioXenDevice *vxd = (VirtioXenDevice *)xd;
-    VirtioXenDeviceClass *vxd_class = VIRTIO_XEN_DEVICE_GET_CLASS(vxd);
-
-    // Why are we initializing the bus in a device instantiation fn?
-
-    char virtio_bus_name[] = "virtio-bus";
-    qbus_init(&vxd->bus, sizeof(vxd->bus), TYPE_VIRTIO_XEN_BUS, qdev, virtio_bus_name);
-
-    // Instantiate VHostUserFSXen, a subclass of us
-    if (vxd_class->realize)
-        vxd_class->realize(vxd, errp);
-}
-
-static void xen_device_class_frontend_changed(XenDevice *xendev,
+static void xen_device_class_frontend_changed(XenDevice *xd,
                                        enum xenbus_state frontend_state,
                                        Error **errp)
 {
-    VUF_DBG("frontend_state -> %u", frontend_state);
+    ERRP_GUARD();
+    enum xenbus_state backend_state = xen_device_backend_get_state(xd);
+
+    VUF_DBG("frontend_state -> %u %s | be = %u %s", frontend_state, 
+            xenbus_strstate(frontend_state), backend_state, xenbus_strstate(backend_state));
+
+    switch (frontend_state) {
+    case XenbusStateInitialised:
+    case XenbusStateConnected:
+        if (backend_state == XenbusStateConnected) {
+            break;
+        }
+
+        // TODO: perform the connection? do we have anything else to do?
+
+        // xen_block_connect(xd, errp);
+        // if (*errp) {
+        //     break;
+        // }
+
+        xen_device_backend_set_state(xd, XenbusStateConnected);
+        break;
+
+    case XenbusStateClosing:
+        xen_device_backend_set_state(xd, XenbusStateClosing);
+        break;
+
+    case XenbusStateClosed:
+    case XenbusStateUnknown:
+        // TODO: free the resources now that FE is no longer using them
+        // xen_block_disconnect(xd, errp);
+        // if (*errp) {
+        //     break;
+        // }
+
+        xen_device_backend_set_state(xd, XenbusStateClosed);
+        break;
+
+    default:
+        break;
+    }
 }
 
 static void virtio_xen_device_class_init(ObjectClass *obj_class, void *data)
@@ -87,7 +107,7 @@ static void virtio_xen_device_class_init(ObjectClass *obj_class, void *data)
 
     DeviceClass *dev_class = DEVICE_CLASS(obj_class);
     XenDeviceClass *xd_class = XEN_DEVICE_CLASS(dev_class);
-    VirtioXenDeviceClass *vxd_class = VIRTIO_XEN_DEVICE_CLASS(obj_class);
+    // VirtioXenDeviceClass *vxd_class = VIRTIO_XEN_DEVICE_CLASS(obj_class);
 
     // xd_class->unplug = virtio_ccw_busdev_unplug;
     //dev_class->realize = virtio_xen_busdev_realize; // XXX: override or not??? maybe don't touch DeviceClass!
@@ -109,17 +129,16 @@ static void virtio_xen_device_class_init(ObjectClass *obj_class, void *data)
     // the prior code
 
     xd_class->get_name = xen_device_class_get_name;
-    xd_class->realize = xen_device_class_realize; // lots of XS writes
+    xd_class->realize = virtio_xen_device_realize; // is the subclass realize method
     xd_class->frontend_changed = xen_device_class_frontend_changed;
-    // xd_class->unrealize = xen_block_unrealize; // TODO:
+    xd_class->unrealize = virtio_xen_device_unrealize;
     set_bit(DEVICE_CATEGORY_STORAGE, dev_class->categories);
     dev_class->user_creatable = true; // XXX: ??????
 
     // device_class_set_props(dev_class, xen_block_props); // TODO:
-    vxd_class->realize = virtio_xen_device_realize;
-
-    // XXX: set up vxd_class at all??? when would this get created???
-    // link them together?
+    // vxd_class->realize = virtio_xen_device_realize;
+    // vxd_class->unrealize = virtio_xen_device_unrealize;
+    // vxd_class->parent_reset = virtio_xen_device_parent_reset;
 }
 
 static const TypeInfo virtio_xen_device_info = {
@@ -128,7 +147,7 @@ static const TypeInfo virtio_xen_device_info = {
     .instance_size = sizeof(VirtioXenDevice),
     .class_init = virtio_xen_device_class_init,
     .class_size = sizeof(VirtioXenDeviceClass),
-    .abstract = true, // ????
+    .abstract = true, // FIXME: ????
 };
 
 /* virtio-xen-bus state */
@@ -136,17 +155,33 @@ static const TypeInfo virtio_xen_device_info = {
 // NOTE: xen_be_printf -> xen_pv_printf
 
 // NOTE: aka virtio_alloc from old code?
-static void virtio_xen_device_realize(VirtioXenDevice *vx, Error **errp)
+// TODO: rename to xen_virtio_realize ?
+static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
 {
+    ERRP_GUARD();
+
+    // XenDevice.realize invokes us
+
     VUF_DBG(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
 
-    // VirtIODevice *vio_dev = NULL;
+    // NOTE: FE should be in Initialised state
+    // before we attempt to read resources from xenbus
 
-    VirtioXenDeviceClass *vx_class = VIRTIO_XEN_DEVICE_GET_CLASS(vx);
-    XenDevice *xd = XEN_DEVICE(vx);
-    XenDeviceClass *xd_class = XEN_DEVICE_GET_CLASS(xd);
-    Error *err = NULL;
+    // ✓ point XenDevice.realize to the subclass realize!
+    //      xd_class->realize = virtio_xen_device_class_realize;
+    // ✓ cast XenDevice into VirtioXenDevice
+    // ✓ in VirtioXenDevice.realize, invoke the vxd_class.realize (vhost user fs realize)
+
+    //XenDeviceClass *xd_class = XEN_DEVICE_GET_CLASS(xd);
+    VirtioXenDevice *vxd = VIRTIO_XEN_DEVICE(xd);
+    VirtioXenDeviceClass *vxd_class = VIRTIO_XEN_DEVICE_GET_CLASS(vxd);
+
+    //Error *err = NULL;
     int ret;
+
+    // TODO: Why are we initializing a bus in a device instantiation fn?
+    char virtio_bus_name[] = "virtio-bus";
+    qbus_init(&vxd->bus, sizeof(vxd->bus), TYPE_VIRTIO_XEN_BUS, DEVICE(xd), virtio_bus_name);
 
     //enum xenbus_state xb_state;
 
@@ -160,18 +195,27 @@ static void virtio_xen_device_realize(VirtioXenDevice *vx, Error **errp)
 
     // TODO: set host_features?
 
-    // FIXME: who writes these?
-    // VUF_DBG("XenDevice name '%s'", xd->name);
-    // VUF_DBG("XenDevice backend_path '%s'", xd->backend_path);
-    // VUF_DBG("XenDevice frontend_path '%s'", xd->frontend_path);
-    // VUF_DBG("XenDevice frontend-id %u", xd->frontend_id);
-    // VUF_DBG("xs: frontend-id = %u", xd->frontend_id);
-    //xen_device_backend_printf(xd, "frontend-id", "%d", xd->frontend_id);
-
     // NOTE: the below realize invocations invoke our
     // vhost-user-fs-xen realize callback
 
     // FIXME: continue here?
+
+    // QEMU's method to creating an event channel.
+    // from old [virtio_notify_init]
+    vxd->evtchn = qemu_xen_evtchn_open();
+    if (vxd->evtchn == NULL) {
+        error_setg(errp, "could not open Xen event channel");
+        return;
+    }
+    fcntl(qemu_xen_evtchn_fd(vxd->evtchn), F_SETFD, FD_CLOEXEC);
+    VUF_DBG("vxd->evtchn = %p", vxd->evtchn);
+
+    // TODO: continue with [virtio_connect]
+
+    // XXX: don't we need to wait until FE is state=3?
+    // I see some race conditions reading from XS with zero values.
+
+    // TODO: Read the guest resources from xenstore
 
     if (0 == strncmp(xd->name, "virtio-fs", 9)) {
         // TODO:
@@ -181,58 +225,116 @@ static void virtio_xen_device_realize(VirtioXenDevice *vx, Error **errp)
     // see virtio_alloc in the older code
     // see xen_virtio_blk_init too
 
-    ret = xenstore_read_uint64(xd->frontend_path, "conf-mfn",
-                               &vx->conf_mfn);
-    if (ret != -1) {
-        error_setg(errp, "bad conf-mfn from frontend");
-        return;
-    }
-    VUF_DBG("conf-mfn %lu", vx->conf_evtchn);
+    // Wait for frontend to export its resources to xenstore.
+    // FIXME: why do we have to do this? missing some logic?
+    // maybe not supposed to read these resources here in the realize fn?
+    int state;
+    do {
+        ret = xenstore_read_int(xd->frontend_path, "state", &state);
+        if (ret == -1) {
+            error_setg(errp, "error reading fe state");
+            return;
+        }
+        VUF_DBG("wait... fe state = %d", state);
+    } while (state != 3);
 
-    ret = xenstore_read_uint64(xd->frontend_path, "conf-evtchn",
-                               &vx->conf_evtchn);
-    if (ret != -1) {
-        error_setg(errp, "bad conf-evtchn from frontend");
-        return;
-    }
-    VUF_DBG("conf-evtchn %lu", vx->conf_evtchn);
+    //
+    // NOTE: Shared page for the configuration
+    //
 
-    ret = xenstore_read_uint64(xd->frontend_path, "notify-evtchn",
-                               &vx->notify_evtchn);
-    if (ret != -1) {
+    int port;
+
+    // ret = xenstore_read_uint64(xd->frontend_path, "conf-mfn",
+    //                            &vx->conf_mfn);
+    // if (ret != -1) {
+    //     error_setg(errp, "bad conf-mfn from frontend");
+    //     return;
+    // }
+    // VUF_DBG("conf-mfn %lu", vx->conf_evtchn);
+
+    //
+    // NOTE: Event channel for configuration updates
+    //
+
+    // ret = xenstore_read_uint64(xd->frontend_path, "conf-evtchn",
+    //                            &vx->conf_evtchn);
+    // if (ret != -1) {
+    //     error_setg(errp, "bad conf-evtchn from frontend");
+    //     return;
+    // }
+    // VUF_DBG("conf-evtchn %lu", vx->conf_evtchn);
+
+    //
+    // NOTE: Event channel for the virtqueues
+    //
+
+    vxd->notify_remote = -1;
+    vxd->notify_local = -1;
+
+    ret = xenstore_read_int(xd->frontend_path, "notify-evtchn", &port);
+    if (ret == -1 || port < 0) {
         error_setg(errp, "bad notify-evtchn from frontend");
         return;
     }
-    VUF_DBG("notify-evtchn %lu", vx->notify_evtchn);
+    vxd->notify_remote = port;
+    VUF_DBG("vxd->notify_remote %u", vxd->notify_remote);
 
-    //TODO: continue here
+    // bind both end points to the same event channel
+    vxd->notify_local = qemu_xen_evtchn_bind_interdomain(vxd->evtchn,
+                                                         xd->frontend_id,
+                                                         vxd->notify_remote);
+    if (vxd->notify_local == -1) {
+        if (errp)
+            error_setg_errno(errp, errno, "error binding notify evtchn");
+        goto out_unbind;
+    }
+    VUF_DBG("bind notify_remote ok");
+
+    // TODO: continue here
     // FIXME: Why are we calling this here explicitly?
-    if (xd_class->realize) {
-        qemu_printf("%s: -> XenDeviceClass::realize()\n", __func__);
-        xd_class->realize(xd, &err);
-        if (err) {
-            goto out_err;
-        }
-    } else {
-        VUF_DBG("XenDeviceClass has no realize method?");
-    }
-    if (vx_class->realize) {
-        qemu_printf("%s: -> VirtioXenDeviceClass::realize()\n", __func__);
-        vx_class->realize(vx, &err); // -> vhost_user_fs_xen_realize
-        if (err) {
-            goto out_err;
-        }
-    }
+    //if (xd_class->realize) {
+    //    qemu_printf("%s: -> XenDeviceClass::realize()\n", __func__);
+    //    xd_class->realize(xd, &err);
+    //    if (err) {
+    //        goto out_err;
+    //    }
+    //} else {
+    //    VUF_DBG("XenDeviceClass has no realize method?");
+    //}
+    //if (vxd_class->realize) {
+    //    qemu_printf("%s: -> VirtioXenDeviceClass::realize()\n", __func__);
+    //    vxd_class->realize(vx, &err); // -> vhost_user_fs_xen_realize
+    //    if (err) {
+    //        goto out_err;
+    //    }
+    //}
 
     VUF_DBG(">> XenDevice name '%s'", xd->name);
     VUF_DBG(">> XenDevice backend_path '%s'", xd->backend_path);
     VUF_DBG(">> XenDevice frontend_path '%s'", xd->frontend_path);
     VUF_DBG(">> XenDevice frontend-id %u", xd->frontend_id);
 
+    if (vxd_class->realize)
+        vxd_class->realize(vxd, errp);
+
     return;
 
-out_err:
-    // TODO: bla bla bla
+out_unbind:
+    qemu_xen_evtchn_unbind(vxd->evtchn, vxd->notify_local);
+}
+
+static void virtio_xen_device_unrealize(XenDevice *xd)
+{
+    VUF_DBG("");
+
+    VirtioXenDevice *vxd = VIRTIO_XEN_DEVICE(xd);
+
+    if (vxd->notify_local != -1)
+        qemu_xen_evtchn_unbind(vxd->evtchn, vxd->notify_local);
+    vxd->notify_local = -1;
+
+    // TODO: unbind notify_local
+    // TODO: unmap conf page
 }
 
 /* virtio-xen-bus class */
@@ -241,7 +343,7 @@ out_err:
 
 static void virtio_xen_notify(DeviceState *d, uint16_t vector)
 {
-    NOT_IMPL;
+    VUF_DBG("bus -> ");
     // XenVirtioDev *xv_dev = opaque;
     // xc_evtchn_notify(xv_dev->notify_evtchndev, xv_dev->notify_local_port);
 }
@@ -249,13 +351,14 @@ static void virtio_xen_notify(DeviceState *d, uint16_t vector)
 static void virtio_xen_save_config(DeviceState *d, QEMUFile *f)
 {
     NOT_IMPL;
+    VUF_DBG("bus -> ");
     // VirtioCcwDevice *dev = VIRTIO_XEN_DEVICE(d);
     // TODO: vmstate_save_state(f, &vmstate_virtio_xen_dev, dev, NULL);
 }
 
 static int virtio_xen_load_config(DeviceState *d, QEMUFile *f)
 {
-    NOT_IMPL;
+    VUF_DBG("bus -> ");
     // VirtioCcwDevice *dev = VIRTIO_XEN_DEVICE(d);
     // TODO: return vmstate_load_state(f, &vmstate_virtio_ccw_dev, dev, 1);
     return 0;
@@ -263,25 +366,25 @@ static int virtio_xen_load_config(DeviceState *d, QEMUFile *f)
 
 static void virtio_xen_save_queue(DeviceState *d, int n, QEMUFile *f)
 {
-    NOT_IMPL;
+    VUF_DBG("bus -> ");
 }
 
 static int virtio_xen_load_queue(DeviceState *d, int n, QEMUFile *f)
 {
-    NOT_IMPL;
+    VUF_DBG("bus -> ");
     return 0;
 }
 
 static int virtio_xen_set_guest_notifiers(DeviceState *d, int nvqs,
                                           bool assigned)
 {
-    NOT_IMPL;
+    VUF_DBG("bus -> ");
     return -EFAULT;
 }
 
 static void virtio_xen_bus_class_init(ObjectClass *klass, void *data)
 {
-    VUF_DBG("enter. set up method callbacks");
+    qemu_printf("%s: bus -> set up method callbacks\n", __func__);
 
     VirtioBusClass *k = VIRTIO_BUS_CLASS(klass);
     BusClass *bus_class = BUS_CLASS(klass);

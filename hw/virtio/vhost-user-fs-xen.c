@@ -37,18 +37,16 @@ static Property vhost_user_fs_xen_properties[] = {
 
 static void vhost_user_fs_xen_realize(VirtioXenDevice *xen_dev, Error **errp)
 {
-    VUF_DBG(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+    ERRP_GUARD();
+
+    VUF_DBG("");
 
     VHostUserFSXen *dev = VHOST_USER_FS_XEN(xen_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
 
     qdev_realize(vdev, BUS(&xen_dev->bus), errp);
-    if (!qdev_is_realized(vdev)) {
-        qemu_printf("%s: vdev not realized\n", __func__);
-        if (errp)
-            VUF_QERR(*errp, "");
-    }
-    qemu_printf("%s exit\n", __func__);
+    if (!qdev_is_realized(vdev) && errp)
+        VUF_QERR(*errp, "qdev_realize:");
 }
 
 static void vhost_user_fs_xen_instance_init(Object *obj)

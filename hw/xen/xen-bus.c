@@ -322,6 +322,7 @@ static void xen_bus_realize(BusState *bus, Error **errp)
     unsigned int i;
     Error *local_err = NULL;
 
+    printf("[INTERNAL] %s\n", __func__);
     trace_xen_bus_realize();
 
     xenbus->xsh = qemu_xen_xs_open();
@@ -385,6 +386,7 @@ static void xen_bus_class_init(ObjectClass *class, void *data)
     BusClass *bus_class = BUS_CLASS(class);
     HotplugHandlerClass *hotplug_class = HOTPLUG_HANDLER_CLASS(class);
 
+    printf("[INTERNAL] %s\n", __func__);
     bus_class->print_dev = xen_bus_print_dev;
     bus_class->get_dev_path = xen_bus_get_dev_path;
     bus_class->realize = xen_bus_realize;
@@ -500,6 +502,8 @@ static void xen_device_backend_changed(void *opaque, const char *path)
     const char *type = object_get_typename(OBJECT(xendev));
     enum xenbus_state state;
     unsigned int online;
+
+    printf("[INTERNAL] %s\n", __func__);
 
     trace_xen_device_backend_changed(type, xendev->name);
 
@@ -716,10 +720,10 @@ static bool xen_device_frontend_exists(XenDevice *xendev)
 static void xen_device_frontend_create(XenDevice *xendev, Error **errp)
 {
     ERRP_GUARD();
-    printf("!!!! %s\n", __func__);
     XenBus *xenbus = XEN_BUS(qdev_get_parent_bus(DEVICE(xendev)));
     XenDeviceClass *xendev_class = XEN_DEVICE_GET_CLASS(xendev);
 
+    printf("[INTERNAL] %s\n", __func__);
     if (xendev_class->get_frontend_path) {
         xendev->frontend_path = xendev_class->get_frontend_path(xendev, errp);
         if (!xendev->frontend_path) {
@@ -1011,12 +1015,12 @@ static void xen_device_exit(Notifier *n, void *data)
 static void xen_device_realize(DeviceState *dev, Error **errp)
 {
     ERRP_GUARD();
-    printf("!!!! %s\n", __func__);
     XenDevice *xendev = XEN_DEVICE(dev);
     XenDeviceClass *xendev_class = XEN_DEVICE_GET_CLASS(xendev);
     XenBus *xenbus = XEN_BUS(qdev_get_parent_bus(DEVICE(xendev)));
     const char *type = object_get_typename(OBJECT(xendev));
 
+    printf("[INTERNAL] %s\n", __func__);
     if (xendev->frontend_id == DOMID_INVALID) {
         xendev->frontend_id = xen_domid;
     }
@@ -1079,6 +1083,7 @@ static void xen_device_realize(DeviceState *dev, Error **errp)
         xen_device_frontend_set_state(xendev, XenbusStateInitialising, true);
     }
 
+    printf("[INTERNAL] %s calling xendev_class->realize\n", __func__);
     if (xendev_class->realize) {
         xendev_class->realize(xendev, errp);
         if (*errp) {
@@ -1104,7 +1109,7 @@ static void xen_device_class_init(ObjectClass *class, void *data)
 {
     DeviceClass *dev_class = DEVICE_CLASS(class);
 
-    printf("!!!! %s\n", __func__);
+    printf("[INTERNAL] %s\n", __func__);
     dev_class->realize = xen_device_realize;
     dev_class->unrealize = xen_device_unrealize;
     device_class_set_props(dev_class, xen_device_props);
