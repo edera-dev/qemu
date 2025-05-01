@@ -68,16 +68,17 @@ struct VirtioXenDevice {
     VirtIODevice *vd;
     uint32_t host_features;
 
-    uint64_t conf_evtchn, conf_mfn; // TODO xenevtchn_handle ?
-
-    // TODO: Pull in items shared by guest via xenbus:
-    void *conf_page;
-    // int conf_page_ref;
-
-    // NOTE: virtqueue state
     xenevtchn_handle *evtchn;
+    xengnttab_handle *gnttab;
+
+    // virtqueue
     evtchn_port_t notify_local;
     evtchn_port_t notify_remote;
+
+    // configuration page
+    uint32_t conf_gntref;
+    evtchn_port_t conf_remote;
+    void *conf_page;
 };
 
 #endif

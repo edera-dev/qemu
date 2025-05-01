@@ -33,6 +33,7 @@
 #include "hw/virtio/virtio-xen.h"
 #include "hw/xen/xen-bus.h"
 #include "hw/xen/xen_pvdev.h"
+#include "hw/xen/xen_backend_ops.h"
 #include "qemu/error-report.h"
 #include "qemu/log.h"
 #include "trace.h"
@@ -163,6 +164,10 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     // XenDevice.realize invokes us
 
     VUF_DBG(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+    VUF_DBG(">> XenDevice name '%s'", xd->name);
+    VUF_DBG(">> XenDevice backend_path '%s'", xd->backend_path);
+    VUF_DBG(">> XenDevice frontend_path '%s'", xd->frontend_path);
+    VUF_DBG(">> XenDevice frontend-id %u", xd->frontend_id);
 
     // NOTE: FE should be in Initialised state
     // before we attempt to read resources from xenbus
@@ -200,15 +205,21 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
 
     // FIXME: continue here?
 
-    // QEMU's method to creating an event channel.
-    // from old [virtio_notify_init]
+    // Open a handle to the event channel system
+    // cf [virtio_notify_init]
     vxd->evtchn = qemu_xen_evtchn_open();
     if (vxd->evtchn == NULL) {
-        error_setg(errp, "could not open Xen event channel");
+        error_setg(errp, "error opening handle to Xen event channel");
         return;
     }
     fcntl(qemu_xen_evtchn_fd(vxd->evtchn), F_SETFD, FD_CLOEXEC);
-    VUF_DBG("vxd->evtchn = %p", vxd->evtchn);
+
+    // Open a handle to the grant table system
+    vxd->gnttab = qemu_xen_gnttab_open();
+    if (vxd->gnttab == NULL) {
+        error_setg(errp, "error opening handle to Xen grant table");
+        return;
+    }
 
     // TODO: continue with [virtio_connect]
 
@@ -226,8 +237,7 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     // see xen_virtio_blk_init too
 
     // Wait for frontend to export its resources to xenstore.
-    // FIXME: why do we have to do this? missing some logic?
-    // maybe not supposed to read these resources here in the realize fn?
+    // FIXME: why do we have to do this manually here?
     int state;
     do {
         ret = xenstore_read_int(xd->frontend_path, "state", &state);
@@ -236,29 +246,44 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
             return;
         }
         VUF_DBG("wait... fe state = %d", state);
-    } while (state != 3);
+    } while (state != XenbusStateInitialised);
+
+    int port;
 
     //
     // NOTE: Shared page for the configuration
     //
 
-    int port;
+    uint64_t gntref;
+    ret = xenstore_read_uint64(xd->frontend_path, "conf-gntref",
+                               &gntref);
+    if (ret == -1) {
+        error_setg(errp, "error reading fe/conf-gntref from xs");
+        return;
+    }
+    if (gntref > UINT_MAX) {
+        error_setg(errp, "bad fe/conf-gntref (too big): %lu", gntref);
+        return;
+    }
+    vxd->conf_gntref = gntref;
+    VUF_DBG("conf-gntref %u", vxd->conf_gntref);
 
-    // ret = xenstore_read_uint64(xd->frontend_path, "conf-mfn",
-    //                            &vx->conf_mfn);
-    // if (ret != -1) {
-    //     error_setg(errp, "bad conf-mfn from frontend");
-    //     return;
-    // }
-    // VUF_DBG("conf-mfn %lu", vx->conf_evtchn);
-
+    vxd->conf_page = qemu_xen_gnttab_map_refs(vxd->gnttab,
+                                              1u, xd->frontend_id,
+                                              &vxd->conf_gntref,
+                                              PROT_READ|PROT_WRITE);
+    if (vxd->conf_page == NULL) {
+        error_setg_errno(errp, errno, "error mapping gntref");
+        return;
+    }
+    VUF_DBG("conf page = %p", vxd->conf_page);
     //
     // NOTE: Event channel for configuration updates
     //
 
     // ret = xenstore_read_uint64(xd->frontend_path, "conf-evtchn",
     //                            &vx->conf_evtchn);
-    // if (ret != -1) {
+    // if (ret == -1) {
     //     error_setg(errp, "bad conf-evtchn from frontend");
     //     return;
     // }
@@ -291,28 +316,6 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     VUF_DBG("bind notify_remote ok");
 
     // TODO: continue here
-    // FIXME: Why are we calling this here explicitly?
-    //if (xd_class->realize) {
-    //    qemu_printf("%s: -> XenDeviceClass::realize()\n", __func__);
-    //    xd_class->realize(xd, &err);
-    //    if (err) {
-    //        goto out_err;
-    //    }
-    //} else {
-    //    VUF_DBG("XenDeviceClass has no realize method?");
-    //}
-    //if (vxd_class->realize) {
-    //    qemu_printf("%s: -> VirtioXenDeviceClass::realize()\n", __func__);
-    //    vxd_class->realize(vx, &err); // -> vhost_user_fs_xen_realize
-    //    if (err) {
-    //        goto out_err;
-    //    }
-    //}
-
-    VUF_DBG(">> XenDevice name '%s'", xd->name);
-    VUF_DBG(">> XenDevice backend_path '%s'", xd->backend_path);
-    VUF_DBG(">> XenDevice frontend_path '%s'", xd->frontend_path);
-    VUF_DBG(">> XenDevice frontend-id %u", xd->frontend_id);
 
     if (vxd_class->realize)
         vxd_class->realize(vxd, errp);
@@ -328,13 +331,20 @@ static void virtio_xen_device_unrealize(XenDevice *xd)
     VUF_DBG("");
 
     VirtioXenDevice *vxd = VIRTIO_XEN_DEVICE(xd);
+    int ret;
 
     if (vxd->notify_local != -1)
         qemu_xen_evtchn_unbind(vxd->evtchn, vxd->notify_local);
     vxd->notify_local = -1;
 
     // TODO: unbind notify_local
-    // TODO: unmap conf page
+
+    if (vxd->conf_page != NULL) {
+        ret = qemu_xen_gnttab_unmap(vxd->gnttab, vxd->conf_page,
+                                    &vxd->conf_gntref, 1u);
+        if (ret < 0)
+            qemu_printf("%s: error unmapping conf_page: %d", __func__, ret);
+    }
 }
 
 /* virtio-xen-bus class */
