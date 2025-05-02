@@ -44,6 +44,7 @@
 
 static void virtio_xen_device_realize(XenDevice *, Error **);
 static void virtio_xen_device_unrealize(XenDevice *);
+static bool virtio_xen_event(void *);
 
 /* virtio-xen-device */
 
@@ -277,17 +278,20 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
         return;
     }
     VUF_DBG("conf page = %p", vxd->conf_page);
+
     //
     // NOTE: Event channel for configuration updates
     //
 
-    // ret = xenstore_read_uint64(xd->frontend_path, "conf-evtchn",
-    //                            &vx->conf_evtchn);
-    // if (ret == -1) {
-    //     error_setg(errp, "bad conf-evtchn from frontend");
-    //     return;
-    // }
-    // VUF_DBG("conf-evtchn %lu", vx->conf_evtchn);
+    vxd->conf_remote = -1;
+
+    ret = xenstore_read_int(xd->frontend_path, "conf-evtchn", &port);
+    if (ret == -1 || port < 0) {
+        error_setg(errp, "bad fe/conf-evtchn");
+        return;
+    }
+    vxd->conf_remote = port;
+    VUF_DBG("vxd->conf_remote %u", vxd->conf_remote);
 
     //
     // NOTE: Event channel for the virtqueues
@@ -298,24 +302,28 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
 
     ret = xenstore_read_int(xd->frontend_path, "notify-evtchn", &port);
     if (ret == -1 || port < 0) {
-        error_setg(errp, "bad notify-evtchn from frontend");
+        error_setg(errp, "bad fe/notify-evtchn");
         return;
     }
     vxd->notify_remote = port;
     VUF_DBG("vxd->notify_remote %u", vxd->notify_remote);
 
-    // bind both end points to the same event channel
-    vxd->notify_local = qemu_xen_evtchn_bind_interdomain(vxd->evtchn,
-                                                         xd->frontend_id,
-                                                         vxd->notify_remote);
-    if (vxd->notify_local == -1) {
-        if (errp)
-            error_setg_errno(errp, errno, "error binding notify evtchn");
-        goto out_unbind;
-    }
-    VUF_DBG("bind notify_remote ok");
+    // The old implementation [xen_be_bind_evtchn] uses code
+    // from commit d94f94862015 in 2009, which seems to use internal
+    // XenDevice state to handle an event, calling
+    // [xen_be_evtchn_event], then a likely user-defined callback.
+    // This seems to be part of XenDevOps.event... hooked to
+    // [virtio_event].
+    // The new API requires these arguments explicitly. Which is the
+    // "port" here? The one allocated to us after binding to the
+    // remote?
 
-    // TODO: continue here
+    vxd->notify = xen_device_bind_event_channel(xd, vxd->notify_remote,
+                                                virtio_xen_event,
+                                                NULL, errp);
+    if (vxd->notify == NULL)
+        goto out_unbind;
+    VUF_DBG("bind notify ok");
 
     if (vxd_class->realize)
         vxd_class->realize(vxd, errp);
@@ -333,11 +341,9 @@ static void virtio_xen_device_unrealize(XenDevice *xd)
     VirtioXenDevice *vxd = VIRTIO_XEN_DEVICE(xd);
     int ret;
 
-    if (vxd->notify_local != -1)
-        qemu_xen_evtchn_unbind(vxd->evtchn, vxd->notify_local);
-    vxd->notify_local = -1;
-
-    // TODO: unbind notify_local
+    if (vxd->notify != NULL)
+        xen_device_unbind_event_channel(xd, vxd->notify, &error_warn);
+    vxd->notify = NULL;
 
     if (vxd->conf_page != NULL) {
         ret = qemu_xen_gnttab_unmap(vxd->gnttab, vxd->conf_page,
@@ -345,6 +351,12 @@ static void virtio_xen_device_unrealize(XenDevice *xd)
         if (ret < 0)
             qemu_printf("%s: error unmapping conf_page: %d", __func__, ret);
     }
+}
+
+static bool virtio_xen_event(void *opaque)
+{
+    NOT_IMPL;
+    return false;
 }
 
 /* virtio-xen-bus class */

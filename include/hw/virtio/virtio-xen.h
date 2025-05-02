@@ -79,6 +79,9 @@ struct VirtioXenDevice {
     uint32_t conf_gntref;
     evtchn_port_t conf_remote;
     void *conf_page;
+
+    // NOTE: I think the modern API uses this new type
+    XenEventChannel *notify;
 };
 
 #endif
