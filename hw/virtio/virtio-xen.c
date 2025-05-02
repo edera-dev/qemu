@@ -269,12 +269,10 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     vxd->conf_gntref = gntref;
     VUF_DBG("conf-gntref %u", vxd->conf_gntref);
 
-    vxd->conf_page = qemu_xen_gnttab_map_refs(vxd->gnttab,
-                                              1u, xd->frontend_id,
-                                              &vxd->conf_gntref,
-                                              PROT_READ|PROT_WRITE);
+    vxd->conf_page = xen_device_map_grant_refs(xd, &vxd->conf_gntref,
+                                               1u, PROT_READ|PROT_WRITE, errp);
     if (vxd->conf_page == NULL) {
-        error_setg_errno(errp, errno, "error mapping gntref");
+        error_setg(errp, "error mapping gntref");
         return;
     }
     VUF_DBG("conf page = %p", vxd->conf_page);
@@ -331,26 +329,23 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     return;
 
 out_unbind:
-    qemu_xen_evtchn_unbind(vxd->evtchn, vxd->notify_local);
+    xen_device_unbind_event_channel(xd, vxd->notify, &error_warn);
 }
 
 static void virtio_xen_device_unrealize(XenDevice *xd)
 {
-    VUF_DBG("");
-
     VirtioXenDevice *vxd = VIRTIO_XEN_DEVICE(xd);
-    int ret;
+
+    VUF_DBG("");
 
     if (vxd->notify != NULL)
         xen_device_unbind_event_channel(xd, vxd->notify, &error_warn);
     vxd->notify = NULL;
 
-    if (vxd->conf_page != NULL) {
-        ret = qemu_xen_gnttab_unmap(vxd->gnttab, vxd->conf_page,
-                                    &vxd->conf_gntref, 1u);
-        if (ret < 0)
-            qemu_printf("%s: error unmapping conf_page: %d", __func__, ret);
-    }
+    if (vxd->conf_page != NULL)
+        xen_device_unmap_grant_refs(xd, vxd->conf_page, &vxd->conf_gntref,
+                                    1u, &error_warn);
+    vxd->conf_page = NULL;
 }
 
 static bool virtio_xen_event(void *opaque)
