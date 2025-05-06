@@ -216,7 +216,7 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     fcntl(qemu_xen_evtchn_fd(vxd->evtchn), F_SETFD, FD_CLOEXEC);
 
     // Open a handle to the grant table system
-    vxd->gnttab = qemu_xen_gnttab_open();
+    vxd->gnttab = qemu_xen_gnttab_open(); // XXX: still needed? VirtioDevice has its own
     if (vxd->gnttab == NULL) {
         error_setg(errp, "error opening handle to Xen grant table");
         return;
@@ -230,7 +230,7 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     // TODO: Read the guest resources from xenstore
 
     if (0 == strncmp(xd->name, "virtio-fs", 9)) {
-        // TODO:
+        // TODO: confirm this?
     }
 
     // XXX: read stuff from xenstore? map in resources?
@@ -291,6 +291,13 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     vxd->conf_remote = port;
     VUF_DBG("vxd->conf_remote %u", vxd->conf_remote);
 
+    vxd->conf = xen_device_bind_event_channel(xd, vxd->conf_remote,
+                                              virtio_xen_event,
+                                              vxd, errp);
+    if (vxd->conf == NULL)
+        goto out_unbind_conf;
+    VUF_DBG("bind config evtchn ok");
+
     //
     // NOTE: Event channel for the virtqueues
     //
@@ -316,20 +323,23 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     // "port" here? The one allocated to us after binding to the
     // remote?
 
-    vxd->notify = xen_device_bind_event_channel(xd, vxd->notify_remote,
-                                                virtio_xen_event,
-                                                NULL, errp);
-    if (vxd->notify == NULL)
-        goto out_unbind;
-    VUF_DBG("bind notify ok");
+    // FIXME: this should bind to the virtqueue handler, not the config handler!
+    // vxd->notify = xen_device_bind_event_channel(xd, vxd->notify_remote,
+    //                                             virtio_xen_event,
+    //                                             vxd, errp);
+    // if (vxd->notify == NULL)
+    //     goto out_unbind_notify;
+    // VUF_DBG("bind notify evtchn ok");
 
     if (vxd_class->realize)
         vxd_class->realize(vxd, errp);
 
     return;
 
-out_unbind:
-    xen_device_unbind_event_channel(xd, vxd->notify, &error_warn);
+out_unbind_conf:
+    xen_device_unbind_event_channel(xd, vxd->conf, &error_warn);
+// out_unbind_notify:
+//     xen_device_unbind_event_channel(xd, vxd->notify, &error_warn);
 }
 
 static void virtio_xen_device_unrealize(XenDevice *xd)
@@ -348,10 +358,133 @@ static void virtio_xen_device_unrealize(XenDevice *xd)
     vxd->conf_page = NULL;
 }
 
+static bool virtio_event_read(VirtioXenDevice *vxd)
+{
+    //VirtIODevice *vd = vxd->vd;
+    struct VirtioConfigPage *page = vxd->conf_page;
+    //uint32_t config = VIRTIO_XENBUS_CONFIG(vd);
+    //uint32_t val = 0u;
+    int size, offset;
+
+    offset = page->offset;
+    size = page->size;
+
+    VUF_DBG("%s: offset %d size %d", __func__, offset, size);
+    return true;
+
+#if 0
+    if (offset < config) {
+        switch (offset) {
+        case VIRTIO_XENBUS_HOST_FEATURES:
+            val = vxd->host_features;
+            break;
+        case VIRTIO_XENBUS_GUEST_FEATURES:
+            val = vd->guest_features;
+            break;
+        case VIRTIO_XENBUS_QUEUE_PFN:
+            val = virtio_queue_get_addr(vd, vd->queue_sel)
+                    >> VIRTIO_XENBUS_QUEUE_ADDR_SHIFT;
+            break;
+        case VIRTIO_XENBUS_QUEUE_NUM:
+            val = virtio_queue_get_num(vd, vd->queue_sel);
+            break;
+        case VIRTIO_XENBUS_QUEUE_SEL:
+            val = vd->queue_sel;
+            break;
+        case VIRTIO_XENBUS_STATUS:
+            val = vd->status;
+            break;
+        case VIRTIO_XENBUS_ISR:
+            val = vd->isr;
+            vd->isr = 0;
+            break;
+        default:
+            error_report("%s: unexpected offset 0x%x value 0x%x",
+                         __func__, offset, val);
+            break;
+        }
+    } else {
+        /* reading per driver config, when offset >= config */
+        switch (size) {
+        case 1:
+            val = virtio_config_readb(vd, offset - config);
+            break;
+        case 2:
+            val = virtio_config_readw(vd, offset - config);
+            break;
+        case 4:
+            val = virtio_config_readl(vd, offset - config);
+            break;
+        }
+    }
+
+    /* Remember, the config page in guest is only a shadow */
+    switch (size) {
+    case 1:
+        *((uint8_t *)&page->config[offset]) = (uint8_t)val;
+        break;
+    case 2:
+        *((uint16_t *)&page->config[offset]) = (uint16_t)val;
+        break;
+    case 4:
+        *((uint32_t *)&page->config[offset]) = (uint32_t)val;
+        break;
+    default:
+        fprintf(stderr, "wrong size in read: %d\n", size);
+        exit(-1);
+    }
+#endif
+}
+
+// NOTE: xen_device_poll invokes this handler, but its caller
+// xen_device_event does nothing with our bool return value
 static bool virtio_xen_event(void *opaque)
 {
-    NOT_IMPL;
-    return false;
+    VirtioXenDevice *vxd = opaque;
+    struct VirtioConfigPage *page = vxd->conf_page;
+
+    //uint32_t val; // FIXME: [val] isn't used??
+    uint32_t offset = page->offset;
+    uint32_t size = page->size;
+    uint32_t is_write = page->write;
+
+    bool ret = false;
+
+    xen_mb();
+
+    VUF_DBG("event: %s size %d offset %d",
+            is_write ? "write" : "read", size, offset);
+
+    if (size != 1 && size != 2 && size != 4) {
+        VUF_DBG("event: bad size %d", size);
+        goto out;
+    }
+
+    //switch (size) {
+    //case 1:
+    //    val = *((uint8_t *)&page->config[offset]);
+    //    break;
+    //case 2:
+    //    val = *((uint16_t *)&page->config[offset]);
+    //    break;
+    //case 4:
+    //    val = *((uint32_t *)&page->config[offset]);
+    //    break;
+    //}
+
+    if (is_write) {
+        VUF_DBG("event: write size %d", size);
+        // ret = virtio_event_write(vxd); // FIXME: implement
+    } else {
+        VUF_DBG("event: read size %d", size);
+        ret = virtio_event_read(vxd);
+    }
+
+out:
+    page->be_active = 0;
+    xen_mb();
+
+    return ret;
 }
 
 /* virtio-xen-bus class */
