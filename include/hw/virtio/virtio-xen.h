@@ -75,7 +75,7 @@
 
 /* The remaining space is defined by each driver as the per-driver
  * configuration space */
-#define VIRTIO_XENBUS_CONFIG(dev)          20
+#define VIRTIO_XENBUS_CONFIG_OFF           20
 
 /* Virtio Xenbus ABI version, this must match exactly */
 #define VIRTIO_XENBUS_ABI_VERSION          0
@@ -127,7 +127,9 @@ struct VirtioXenDevice {
     XenDevice parent_obj;
     VirtioBusState bus;
 
+    // subclass of TYPE_VIRTIO_XEN_DEVICE must set this
     VirtIODevice *vd;
+
     uint32_t host_features;
 
     xenevtchn_handle *evtchn; // TODO: remove, not needed

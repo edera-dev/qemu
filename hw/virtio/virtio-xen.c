@@ -39,6 +39,7 @@
 #include "trace.h"
 #include "qemu/qemu-print.h"
 #include "qapi/error.h"
+#include "linux/virtio_ids.h"
 
 #define UNUSED __attribute__((__unused__))
 
@@ -181,6 +182,12 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     //XenDeviceClass *xd_class = XEN_DEVICE_GET_CLASS(xd);
     VirtioXenDevice *vxd = VIRTIO_XEN_DEVICE(xd);
     VirtioXenDeviceClass *vxd_class = VIRTIO_XEN_DEVICE_GET_CLASS(vxd);
+
+    // FIXME: is this right?
+    //vxd->vd = g_malloc0(sizeof(VirtIODevice));
+    //virtio_init(vxd->vd, VIRTIO_ID_FS, 256);
+
+    // FIXME: save some value of [host_features]
 
     //Error *err = NULL;
     int ret;
@@ -360,20 +367,17 @@ static void virtio_xen_device_unrealize(XenDevice *xd)
 
 static bool virtio_event_read(VirtioXenDevice *vxd)
 {
-    //VirtIODevice *vd = vxd->vd;
-    struct VirtioConfigPage *page = vxd->conf_page;
-    //uint32_t config = VIRTIO_XENBUS_CONFIG(vd);
-    //uint32_t val = 0u;
+    VirtIODevice *vd = vxd->vd;
+    struct VirtioConfigPage *conf = vxd->conf_page;
+    uint32_t val = 0;
     int size, offset;
 
-    offset = page->offset;
-    size = page->size;
+    offset = conf->offset;
+    size = conf->size;
 
     VUF_DBG("%s: offset %d size %d", __func__, offset, size);
-    return true;
 
-#if 0
-    if (offset < config) {
+    if (offset < VIRTIO_XENBUS_CONFIG_OFF) {
         switch (offset) {
         case VIRTIO_XENBUS_HOST_FEATURES:
             val = vxd->host_features;
@@ -383,7 +387,7 @@ static bool virtio_event_read(VirtioXenDevice *vxd)
             break;
         case VIRTIO_XENBUS_QUEUE_PFN:
             val = virtio_queue_get_addr(vd, vd->queue_sel)
-                    >> VIRTIO_XENBUS_QUEUE_ADDR_SHIFT;
+                >> VIRTIO_XENBUS_QUEUE_ADDR_SHIFT;
             break;
         case VIRTIO_XENBUS_QUEUE_NUM:
             val = virtio_queue_get_num(vd, vd->queue_sel);
@@ -404,84 +408,121 @@ static bool virtio_event_read(VirtioXenDevice *vxd)
             break;
         }
     } else {
-        /* reading per driver config, when offset >= config */
+        if (size == 1)
+            val = virtio_config_readb(vd, offset - VIRTIO_XENBUS_CONFIG_OFF);
+        if (size == 2)
+            val = virtio_config_readw(vd, offset - VIRTIO_XENBUS_CONFIG_OFF);
+        if (size == 4)
+            val = virtio_config_readl(vd, offset - VIRTIO_XENBUS_CONFIG_OFF);
+    }
+
+    VUF_DBG("%s: val %u %#x", __func__, val, val);
+
+    // config page in guest is only a shadow
+    if (size == 1)
+        *((uint8_t *)&conf->config[offset]) = (uint8_t)val;
+    if (size == 2)
+        *((uint16_t *)&conf->config[offset]) = (uint16_t)val;
+    if (size == 4)
+        *((uint32_t *)&conf->config[offset]) = (uint32_t)val;
+
+    return true;
+}
+
+static bool virtio_event_write(VirtioXenDevice *vxd)
+{
+    VirtIODevice *vd = vxd->vd;
+    struct VirtioConfigPage *conf = vxd->conf_page;
+    // hwaddr ma;
+    uint32_t val;
+    int size, offset;
+
+    offset = conf->offset;
+    size = conf->size;
+
+    if (size == 1)
+        val = *((uint8_t *)&conf->config[offset]);
+    if (size == 2)
+        val = *((uint16_t *)&conf->config[offset]);
+    if (size == 4)
+        val = *((uint32_t *)&conf->config[offset]);
+
+    VUF_DBG("size %d offset %d val %d %#x", size, offset, val, val);
+
+    if (offset < VIRTIO_XENBUS_CONFIG_OFF) {
+        switch (offset) {
+        case VIRTIO_XENBUS_GUEST_FEATURES:
+            vd->guest_features = val;
+            break;
+        // case VIRTIO_XENBUS_QUEUE_PFN:
+        //     ma = (hwaddr)val << VIRTIO_XENBUS_QUEUE_ADDR_SHIFT;
+        //     if (ma == 0) {
+        //         virtio_reset(vd);
+        //     } else {
+        //         virtio_queue_set_addr(vd, vd->queue_sel, ma);
+        //     }
+        //     break;
+        // case VIRTIO_XENBUS_QUEUE_SEL:
+        //     if (val < VIRTIO_XENBUS_QUEUE_MAX) {
+        //         vd->queue_sel = val;
+        //     }
+        //     break;
+        // case VIRTIO_XENBUS_QUEUE_NOTIFY:
+        //     virtio_queue_notify(vd, val);
+        //     break;
+        case VIRTIO_XENBUS_STATUS:
+            virtio_set_status(vd, val & 0xFF);
+            if (vd->status == 0) {
+                virtio_reset(vd); /* XXX reset should clean more? */
+            }
+            break;
+        default:
+            error_report("%s: unexpected offset 0x%x value 0x%x",
+                         __func__, offset, val);
+            break;
+        }
+    } else {
+        uint32_t off = offset - VIRTIO_XENBUS_CONFIG_OFF;
+
         switch (size) {
         case 1:
-            val = virtio_config_readb(vd, offset - config);
+            virtio_config_writeb(vd, off, val);
             break;
         case 2:
-            val = virtio_config_readw(vd, offset - config);
+            virtio_config_writew(vd, off, val);
             break;
         case 4:
-            val = virtio_config_readl(vd, offset - config);
+            virtio_config_writel(vd, off, val);
             break;
         }
     }
 
-    /* Remember, the config page in guest is only a shadow */
-    switch (size) {
-    case 1:
-        *((uint8_t *)&page->config[offset]) = (uint8_t)val;
-        break;
-    case 2:
-        *((uint16_t *)&page->config[offset]) = (uint16_t)val;
-        break;
-    case 4:
-        *((uint32_t *)&page->config[offset]) = (uint32_t)val;
-        break;
-    default:
-        fprintf(stderr, "wrong size in read: %d\n", size);
-        exit(-1);
-    }
-#endif
+    return true;
 }
 
 // NOTE: xen_device_poll invokes this handler, but its caller
 // xen_device_event does nothing with our bool return value
-static bool virtio_xen_event(void *opaque)
+static bool virtio_xen_event(void *_vxd)
 {
-    VirtioXenDevice *vxd = opaque;
-    struct VirtioConfigPage *page = vxd->conf_page;
-
-    //uint32_t val; // FIXME: [val] isn't used??
-    uint32_t offset = page->offset;
-    uint32_t size = page->size;
-    uint32_t is_write = page->write;
+    VirtioXenDevice *vxd = _vxd;
+    struct VirtioConfigPage *conf = vxd->conf_page;
+    uint32_t offset, size, is_write;
 
     bool ret = false;
+
+    offset = conf->offset;
+    size = conf->size;
+    is_write = conf->write;
 
     xen_mb();
 
     VUF_DBG("event: %s size %d offset %d",
             is_write ? "write" : "read", size, offset);
 
-    if (size != 1 && size != 2 && size != 4) {
-        VUF_DBG("event: bad size %d", size);
-        goto out;
-    }
+    if (size == 1 || size == 2 || size == 4)
+        ret = is_write ? virtio_event_write(vxd) : virtio_event_read(vxd);
 
-    //switch (size) {
-    //case 1:
-    //    val = *((uint8_t *)&page->config[offset]);
-    //    break;
-    //case 2:
-    //    val = *((uint16_t *)&page->config[offset]);
-    //    break;
-    //case 4:
-    //    val = *((uint32_t *)&page->config[offset]);
-    //    break;
-    //}
-
-    if (is_write) {
-        VUF_DBG("event: write size %d", size);
-        // ret = virtio_event_write(vxd); // FIXME: implement
-    } else {
-        VUF_DBG("event: read size %d", size);
-        ret = virtio_event_read(vxd);
-    }
-
-out:
-    page->be_active = 0;
+    conf->be_active = 0; // break loop in [__vx_wait] of frontend
     xen_mb();
 
     return ret;
@@ -493,7 +534,7 @@ out:
 
 static void virtio_xen_notify(DeviceState *d, uint16_t vector)
 {
-    VUF_DBG("bus -> ");
+    VUF_DBG("virtqueue notification (not implemented)");
     // XenVirtioDev *xv_dev = opaque;
     // xc_evtchn_notify(xv_dev->notify_evtchndev, xv_dev->notify_local_port);
 }

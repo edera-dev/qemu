@@ -44,7 +44,10 @@ static void vhost_user_fs_xen_realize(VirtioXenDevice *xen_dev, Error **errp)
     VHostUserFSXen *dev = VHOST_USER_FS_XEN(xen_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
 
-    qdev_realize(vdev, BUS(&xen_dev->bus), errp);
+    // save for access in virtio callback routines
+    xen_dev->vd = VIRTIO_DEVICE(vdev);
+
+    qdev_realize(vdev, BUS(&xen_dev->bus), errp); // -> vuf_device_realize
     if (!qdev_is_realized(vdev) && errp)
         VUF_QERR(*errp, "qdev_realize:");
 }
@@ -56,6 +59,7 @@ static void vhost_user_fs_xen_instance_init(Object *obj)
     VHostUserFSXen *dev = VHOST_USER_FS_XEN(obj);
     // VirtioXenDevice *xen_dev = VIRTIO_XEN_DEVICE(obj);
 
+    // XXX: does this create VirtIODevice?
     virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev),
                                 TYPE_VHOST_USER_FS);
 }
