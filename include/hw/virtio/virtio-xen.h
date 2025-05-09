@@ -44,38 +44,38 @@
 /* Following macros define commands used by front end and back end.
  * These are also offsets for specific options in config space. */
 
-/* A 32-bit r/o bitmask of the features supported by the host */
+/* A 64-bit r/o bitmask of the features supported by the host */
 #define VIRTIO_XENBUS_HOST_FEATURES        0
 
-/* A 32-bit r/w bitmask of features activated by the guest */
-#define VIRTIO_XENBUS_GUEST_FEATURES       4
+/* A 64-bit r/w bitmask of features activated by the guest */
+#define VIRTIO_XENBUS_GUEST_FEATURES       8
 
 /* A 32-bit r/w PFN for the currently selected queue */
-#define VIRTIO_XENBUS_QUEUE_PFN            8
+#define VIRTIO_XENBUS_QUEUE_PFN            16
 
 /* A 16-bit r/o queue size for the currently selected queue */
-#define VIRTIO_XENBUS_QUEUE_NUM            12
+#define VIRTIO_XENBUS_QUEUE_NUM            20
 
 /* A 16-bit r/w queue selector */
-#define VIRTIO_XENBUS_QUEUE_SEL            14
+#define VIRTIO_XENBUS_QUEUE_SEL            22
 
 /* A 16-bit r/w queue notifier */
-#define VIRTIO_XENBUS_QUEUE_NOTIFY         16
+#define VIRTIO_XENBUS_QUEUE_NOTIFY         24
 
 /* An 8-bit device status register.  */
-#define VIRTIO_XENBUS_STATUS               18
+#define VIRTIO_XENBUS_STATUS               26
 
 /* An 8-bit r/o interrupt status register.  Reading the value will return the
  * current contents of the ISR and will also clear it.  This is effectively
  * a read-and-acknowledge. */
-#define VIRTIO_XENBUS_ISR                  19
+#define VIRTIO_XENBUS_ISR                  27
 
 /* The bit of the ISR which indicates a device configuration change. */
 #define VIRTIO_XENBUS_ISR_CONFIG           0x2
 
 /* The remaining space is defined by each driver as the per-driver
  * configuration space */
-#define VIRTIO_XENBUS_CONFIG_OFF           20
+#define VIRTIO_XENBUS_CONFIG_OFF           28
 
 /* Virtio Xenbus ABI version, this must match exactly */
 #define VIRTIO_XENBUS_ABI_VERSION          0
@@ -130,7 +130,7 @@ struct VirtioXenDevice {
     // subclass of TYPE_VIRTIO_XEN_DEVICE must set this
     VirtIODevice *vd;
 
-    uint32_t host_features;
+    uint64_t host_features;
 
     xenevtchn_handle *evtchn; // TODO: remove, not needed
     xengnttab_handle *gnttab; // TODO: remove, not needed

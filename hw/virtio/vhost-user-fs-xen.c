@@ -43,9 +43,18 @@ static void vhost_user_fs_xen_realize(VirtioXenDevice *xen_dev, Error **errp)
 
     VHostUserFSXen *dev = VHOST_USER_FS_XEN(xen_dev);
     DeviceState *vdev = DEVICE(&dev->vdev);
+    VirtIODevice *vd = VIRTIO_DEVICE(vdev);
 
-    // save for access in virtio callback routines
-    xen_dev->vd = VIRTIO_DEVICE(vdev);
+    xen_dev->vd = vd; // virtio(-xen) callbacks need this
+
+    // FIXME: Set feature bits? Do we do this here?
+    // See hw/virito/vhost-user.h for feature bits
+    // If we do not, then why does QEMU complain:
+    // warning: vhost-user backend supports VHOST_USER_PROTOCOL_F_CONFIG but QEMU does not.
+
+    virtio_add_feature(&vd->host_features, VIRTIO_F_VERSION_1);
+    virtio_add_feature(&vd->host_features, VIRTIO_F_ACCESS_PLATFORM);
+
 
     qdev_realize(vdev, BUS(&xen_dev->bus), errp); // -> vuf_device_realize
     if (!qdev_is_realized(vdev) && errp)
@@ -57,9 +66,7 @@ static void vhost_user_fs_xen_instance_init(Object *obj)
     VUF_DBG("");
 
     VHostUserFSXen *dev = VHOST_USER_FS_XEN(obj);
-    // VirtioXenDevice *xen_dev = VIRTIO_XEN_DEVICE(obj);
 
-    // XXX: does this create VirtIODevice?
     virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev),
                                 TYPE_VHOST_USER_FS);
 }
