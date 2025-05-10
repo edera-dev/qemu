@@ -52,9 +52,9 @@ static void vhost_user_fs_xen_realize(VirtioXenDevice *xen_dev, Error **errp)
     // If we do not, then why does QEMU complain:
     // warning: vhost-user backend supports VHOST_USER_PROTOCOL_F_CONFIG but QEMU does not.
 
+    // frontend complains without these
     virtio_add_feature(&vd->host_features, VIRTIO_F_VERSION_1);
     virtio_add_feature(&vd->host_features, VIRTIO_F_ACCESS_PLATFORM);
-
 
     qdev_realize(vdev, BUS(&xen_dev->bus), errp); // -> vuf_device_realize
     if (!qdev_is_realized(vdev) && errp)

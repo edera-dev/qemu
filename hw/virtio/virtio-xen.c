@@ -419,7 +419,7 @@ static bool virtio_event_read(VirtioXenDevice *vxd)
             val = virtio_config_readl(vd, off);
             break;
         case 8:
-            // TODO:
+            // FIXME:
             // "2.5.1 Driver Requirements: Device Configuration Space
             // Drivers MUST NOT assume reads from fields greater than
             // 32 bits wide are atomic, nor are reads from
@@ -525,7 +525,7 @@ static bool virtio_event_write(VirtioXenDevice *vxd)
             virtio_config_writel(vd, off, val);
             break;
         case 8:
-            // TODO:
+            // FIXME:
             // "2.5.1 Driver Requirements: Device Configuration Space
             // Drivers MUST NOT assume reads from fields greater than
             // 32 bits wide are atomic, nor are reads from
