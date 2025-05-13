@@ -369,37 +369,43 @@ static bool virtio_event_read(VirtioXenDevice *vxd)
     uint64_t val = 0;
     int size, offset;
 
+    // FIXME: Check offset does not exceed config buffer
     offset = conf->offset;
     size = conf->size;
 
-    VUF_DBG("offset %d size %d", offset, size);
+    //VUF_DBG("offset %d size %d", offset, size);
 
     if (offset < VIRTIO_XENBUS_CONFIG_OFF) {
         switch (offset) {
         case VIRTIO_XENBUS_HOST_FEATURES:
             val = vd->host_features;
-            VUF_DBG("read host_features %#lx", val);
+            VUF_DBG("host_features %#lx", val);
             break;
         case VIRTIO_XENBUS_GUEST_FEATURES:
             val = vd->guest_features;
-            VUF_DBG("read guest_features %#lx", val);
+            VUF_DBG("guest_features %#lx", val);
             break;
         case VIRTIO_XENBUS_QUEUE_PFN:
             val = virtio_queue_get_addr(vd, vd->queue_sel)
                 >> VIRTIO_XENBUS_QUEUE_ADDR_SHIFT;
+            VUF_DBG("queue_pfn %#lx", val);
             break;
         case VIRTIO_XENBUS_QUEUE_NUM:
             val = virtio_queue_get_num(vd, vd->queue_sel);
+            VUF_DBG("queue_num %#lx", val);
             break;
         case VIRTIO_XENBUS_QUEUE_SEL:
             val = vd->queue_sel;
+            VUF_DBG("queue_sel %#lx", val);
             break;
         case VIRTIO_XENBUS_STATUS:
             val = vd->status;
+            VUF_DBG("status %#lx", val);
             break;
         case VIRTIO_XENBUS_ISR:
             val = vd->isr;
             vd->isr = 0;
+            VUF_DBG("isr %#lx", val);
             break;
         default:
             error_report("%s: unexpected offset 0x%x value 0x%lx",
@@ -424,13 +430,13 @@ static bool virtio_event_read(VirtioXenDevice *vxd)
             // Drivers MUST NOT assume reads from fields greater than
             // 32 bits wide are atomic, nor are reads from
             // multiple fields"
-            val = virtio_config_readl(vd, off);
-            val |= (uint64_t)virtio_config_readl(vd, off + 4) << 32;
+            val = (uint64_t)virtio_config_readl(vd, off) << 32;
+            val |= virtio_config_readl(vd, off + 4);
             break;
         }
     }
 
-    VUF_DBG("val %lu %#lx", val, val);
+    //VUF_DBG("val %lu %#lx", val, val);
 
     // config page in guest is only a shadow
     switch (size) {
@@ -456,10 +462,11 @@ static bool virtio_event_write(VirtioXenDevice *vxd)
 {
     VirtIODevice *vd = vxd->vd;
     struct VirtioConfigPage *conf = vxd->conf_page;
-    // hwaddr ma;
+    hwaddr ma;
     uint64_t val;
     int size, offset;
 
+    // FIXME: Check offset does not exceed config buffer
     offset = conf->offset;
     size = conf->size;
 
@@ -482,30 +489,35 @@ static bool virtio_event_write(VirtioXenDevice *vxd)
 
     if (offset < VIRTIO_XENBUS_CONFIG_OFF) {
         switch (offset) {
-        case VIRTIO_XENBUS_GUEST_FEATURES:
-            vd->guest_features = val;
-            break;
-        // case VIRTIO_XENBUS_QUEUE_PFN:
-        //     ma = (hwaddr)val << VIRTIO_XENBUS_QUEUE_ADDR_SHIFT;
-        //     if (ma == 0) {
-        //         virtio_reset(vd);
-        //     } else {
-        //         virtio_queue_set_addr(vd, vd->queue_sel, ma);
-        //     }
-        //     break;
-        // case VIRTIO_XENBUS_QUEUE_SEL:
-        //     if (val < VIRTIO_XENBUS_QUEUE_MAX) {
-        //         vd->queue_sel = val;
-        //     }
-        //     break;
-        // case VIRTIO_XENBUS_QUEUE_NOTIFY:
-        //     virtio_queue_notify(vd, val);
-        //     break;
         case VIRTIO_XENBUS_STATUS:
+            VUF_DBG("status %#lx", val);
             virtio_set_status(vd, val & 0xFF);
             if (vd->status == 0) {
                 virtio_reset(vd); /* XXX reset should clean more? */
             }
+            break;
+        case VIRTIO_XENBUS_GUEST_FEATURES:
+            VUF_DBG("guest_features %#lx", val);
+            vd->guest_features = val;
+            break;
+        case VIRTIO_XENBUS_QUEUE_PFN:
+            VUF_DBG("queue_pfn %#lx", val);
+             ma = (hwaddr)val << VIRTIO_XENBUS_QUEUE_ADDR_SHIFT;
+             if (ma == 0) {
+                 virtio_reset(vd);
+             } else {
+                 virtio_queue_set_addr(vd, vd->queue_sel, ma);
+             }
+             break;
+        case VIRTIO_XENBUS_QUEUE_SEL:
+            VUF_DBG("queue_sel %#lx", val);
+            if (val < VIRTIO_QUEUE_MAX) {
+                vd->queue_sel = val;
+            }
+            break;
+        case VIRTIO_XENBUS_QUEUE_NOTIFY:
+            VUF_DBG("queue_notify %#lx", val);
+            virtio_queue_notify(vd, val);
             break;
         default:
             error_report("%s: unexpected offset %#x value %#lx",
@@ -530,8 +542,8 @@ static bool virtio_event_write(VirtioXenDevice *vxd)
             // Drivers MUST NOT assume reads from fields greater than
             // 32 bits wide are atomic, nor are reads from
             // multiple fields"
-            virtio_config_writel(vd, off, (uint32_t)val);
-            virtio_config_writel(vd, off + 4, (uint32_t)(val >> 32));
+            virtio_config_writel(vd, off, val);
+            virtio_config_writel(vd, off + 4, val >> 32);
             break;
         }
     }
