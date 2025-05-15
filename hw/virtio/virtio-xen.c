@@ -47,7 +47,7 @@ static void virtio_xen_device_realize(XenDevice *, Error **);
 static void virtio_xen_device_unrealize(XenDevice *);
 static bool virtio_xen_event(void *);
 
-/* virtio-xen-device */
+/* virtio-xen-device class */
 
 static char *xen_device_class_get_name(XenDevice *xendev, Error **errp)
 {
@@ -153,7 +153,14 @@ static const TypeInfo virtio_xen_device_info = {
     .abstract = true, // FIXME: ????
 };
 
-/* virtio-xen-bus state */
+/* virtio-xen-device init and event handlers */
+
+// the frontend doesn't notify this
+static bool virtio_xen_notify(void *_vxd)
+{
+    VUF_DBG("what???");
+    return true;
+}
 
 // NOTE: xen_be_printf -> xen_pv_printf
 
@@ -214,7 +221,7 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     vxd->evtchn = qemu_xen_evtchn_open();
     if (vxd->evtchn == NULL) {
         error_setg(errp, "error opening handle to Xen event channel");
-        return;
+        goto out;
     }
     fcntl(qemu_xen_evtchn_fd(vxd->evtchn), F_SETFD, FD_CLOEXEC);
 
@@ -222,7 +229,7 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     vxd->gnttab = qemu_xen_gnttab_open(); // XXX: still needed? VirtioDevice has its own
     if (vxd->gnttab == NULL) {
         error_setg(errp, "error opening handle to Xen grant table");
-        return;
+        goto out;
     }
 
     // TODO: continue with [virtio_connect]
@@ -247,7 +254,7 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
         ret = xenstore_read_int(xd->frontend_path, "state", &state);
         if (ret == -1) {
             error_setg(errp, "error reading fe state");
-            return;
+            goto out;
         }
         VUF_DBG("wait... fe state = %d", state);
     } while (state != XenbusStateInitialised);
@@ -263,11 +270,11 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
                                &gntref);
     if (ret == -1) {
         error_setg(errp, "error reading fe/conf-gntref from xs");
-        return;
+        goto out;
     }
     if (gntref > UINT_MAX) {
         error_setg(errp, "bad fe/conf-gntref (too big): %lu", gntref);
-        return;
+        goto out;
     }
     vxd->conf_gntref = gntref;
     VUF_DBG("conf-gntref %u", vxd->conf_gntref);
@@ -276,7 +283,7 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
                                                1u, PROT_READ|PROT_WRITE, errp);
     if (vxd->conf_page == NULL) {
         error_setg(errp, "error mapping gntref");
-        return;
+        goto out;
     }
     VUF_DBG("conf page = %p", vxd->conf_page);
 
@@ -289,7 +296,7 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     ret = xenstore_read_int(xd->frontend_path, "conf-evtchn", &port);
     if (ret == -1 || port < 0) {
         error_setg(errp, "bad fe/conf-evtchn");
-        return;
+        goto out;
     }
     vxd->conf_remote = port;
     VUF_DBG("vxd->conf_remote %u", vxd->conf_remote);
@@ -298,20 +305,30 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
                                               virtio_xen_event,
                                               vxd, errp);
     if (vxd->conf == NULL)
-        goto out_unbind_conf;
+        goto out;
     VUF_DBG("bind config evtchn ok");
 
     //
     // NOTE: Event channel for the virtqueues
     //
+    //
+    // XXX: the notify evtchn: do we ever expect to receive
+    // notification coming FROM the guest on this? When guest
+    // notifies us currently, it uses the conf evtchn
+    // via VIRTIO_XENBUS_QUEUE_NOTIFY which we forward down
+    // Maybe it's only for notification one-way: up to guest from vhost.
+    // If that's the case, then we do not bind anything, or?
+    // Or perhaps we do bind, since we need to notify on it, but
+    // the event handler for us would not be expected to do anything?
+    // TODO: What do ccw or mmio do?
 
-    vxd->notify_remote = -1;
-    vxd->notify_local = -1;
+    //vxd->notify_remote = -1; // TODO: remove
+    //vxd->notify_local = -1; // TODO: remove
 
     ret = xenstore_read_int(xd->frontend_path, "notify-evtchn", &port);
     if (ret == -1 || port < 0) {
         error_setg(errp, "bad fe/notify-evtchn");
-        return;
+        goto out;
     }
     vxd->notify_remote = port;
     VUF_DBG("vxd->notify_remote %u", vxd->notify_remote);
@@ -327,22 +344,20 @@ static void virtio_xen_device_realize(XenDevice *xd, Error **errp)
     // remote?
 
     // FIXME: this should bind to the virtqueue handler, not the config handler!
-    // vxd->notify = xen_device_bind_event_channel(xd, vxd->notify_remote,
-    //                                             virtio_xen_event,
-    //                                             vxd, errp);
-    // if (vxd->notify == NULL)
-    //     goto out_unbind_notify;
-    // VUF_DBG("bind notify evtchn ok");
+    vxd->notify = xen_device_bind_event_channel(xd, vxd->notify_remote,
+                                                virtio_xen_notify,
+                                                vxd, errp);
+    if (vxd->notify == NULL)
+        goto out;
+    VUF_DBG("bind notify evtchn ok");
 
     if (vxd_class->realize)
         vxd_class->realize(vxd, errp);
 
     return;
 
-out_unbind_conf:
-    xen_device_unbind_event_channel(xd, vxd->conf, &error_warn);
-// out_unbind_notify:
-//     xen_device_unbind_event_channel(xd, vxd->notify, &error_warn);
+out:
+    virtio_xen_device_unrealize(xd);
 }
 
 static void virtio_xen_device_unrealize(XenDevice *xd)
@@ -350,6 +365,10 @@ static void virtio_xen_device_unrealize(XenDevice *xd)
     VirtioXenDevice *vxd = VIRTIO_XEN_DEVICE(xd);
 
     VUF_DBG("");
+
+    if (vxd->conf != NULL)
+        xen_device_unbind_event_channel(xd, vxd->conf, &error_warn);
+    vxd->conf = NULL;
 
     if (vxd->notify != NULL)
         xen_device_unbind_event_channel(xd, vxd->notify, &error_warn);
@@ -408,8 +427,8 @@ static bool virtio_event_read(VirtioXenDevice *vxd)
             VUF_DBG("isr %#lx", val);
             break;
         default:
-            error_report("%s: unexpected offset 0x%x value 0x%lx",
-                         __func__, offset, val);
+            error_report("%s: unexpected offset %d value %ld %#lx",
+                         __func__, offset, val, val);
             break;
         }
     } else {
@@ -485,7 +504,7 @@ static bool virtio_event_write(VirtioXenDevice *vxd)
         break;
     }
 
-    VUF_DBG("size %d offset %d val %ld %#lx", size, offset, val, val);
+    //VUF_DBG("size %d offset %d val %ld %#lx", size, offset, val, val);
 
     if (offset < VIRTIO_XENBUS_CONFIG_OFF) {
         switch (offset) {
@@ -516,12 +535,13 @@ static bool virtio_event_write(VirtioXenDevice *vxd)
             }
             break;
         case VIRTIO_XENBUS_QUEUE_NOTIFY:
+            // frontend has sent down a notification
             VUF_DBG("queue_notify %#lx", val);
             virtio_queue_notify(vd, val);
             break;
         default:
-            error_report("%s: unexpected offset %#x value %#lx",
-                         __func__, offset, val);
+            error_report("%s: unexpected offset %d value %ld %#lx",
+                         __func__, offset, val, val);
             break;
         }
     } else {
@@ -567,13 +587,14 @@ static bool virtio_xen_event(void *_vxd)
 
     xen_mb();
 
-    VUF_DBG("event: %s size %d offset %d",
-            is_write ? "write" : "read", size, offset);
+    //VUF_DBG("event: %s size %d offset %d",
+    //        is_write ? "write" : "read", size, offset);
 
     if (size == 1 || size == 2 || size == 4 || size == 8)
         ret = is_write ? virtio_event_write(vxd) : virtio_event_read(vxd);
     else
-        error_report("%s: bad size %u", __func__, size);
+        error_report("%s: bad size %u, %s at offset %d", __func__,
+                     size, is_write ? "write" : "read", offset);
 
     conf->be_active = 0; // break loop in [__vx_wait] of frontend
     xen_mb();
@@ -585,21 +606,23 @@ static bool virtio_xen_event(void *_vxd)
 
 // NOTE: follow from virtio-ccw for structure
 
-static void virtio_xen_notify(DeviceState *d, uint16_t vector)
+// backend has sent up a notification?
+static void virtio_xenbus_notify(DeviceState *dev, uint16_t vector)
 {
-    VUF_DBG("virtqueue notification (not implemented)");
-    // XenVirtioDev *xv_dev = opaque;
+    VUF_DBG("vector %u", vector);
+    //VirtioXenDevice *vxd = VIRTIO_XEN_DEVICE(dev);
     // xc_evtchn_notify(xv_dev->notify_evtchndev, xv_dev->notify_local_port);
+    //qemu_xen_evtchn_notify(vxd->evtchn, )
 }
 
-static void virtio_xen_save_config(DeviceState *d, QEMUFile *f)
+static void virtio_xenbus_save_config(DeviceState *d, QEMUFile *f)
 {
     NOT_IMPL;
     // VirtioCcwDevice *dev = VIRTIO_XEN_DEVICE(d);
     // TODO: vmstate_save_state(f, &vmstate_virtio_xen_dev, dev, NULL);
 }
 
-static int virtio_xen_load_config(DeviceState *d, QEMUFile *f)
+static int virtio_xenbus_load_config(DeviceState *d, QEMUFile *f)
 {
     NOT_IMPL;
     // VirtioCcwDevice *dev = VIRTIO_XEN_DEVICE(d);
@@ -607,22 +630,112 @@ static int virtio_xen_load_config(DeviceState *d, QEMUFile *f)
     return 0;
 }
 
-static void virtio_xen_save_queue(DeviceState *d, int n, QEMUFile *f)
+#if 0
+static void virtio_xenbus_save_queue(DeviceState *d, int n, QEMUFile *f)
 {
     NOT_IMPL;
 }
 
-static int virtio_xen_load_queue(DeviceState *d, int n, QEMUFile *f)
+static int virtio_xenbus_load_queue(DeviceState *d, int n, QEMUFile *f)
 {
     NOT_IMPL;
     return 0;
 }
+#endif
 
-static int virtio_xen_set_guest_notifiers(DeviceState *d, int nvqs,
-                                          bool assigned)
+struct DeviceAndQueue {
+    VirtIODevice *vd;
+    VirtQueue *vq;
+};
+typedef struct DeviceAndQueue DeviceAndQueue;
+
+#include "qemu/main-loop.h"
+
+static void virtio_xenbus_guest_notifier_read(void *_dq)
 {
-    NOT_IMPL;
-    return -EFAULT;
+    DeviceAndQueue *dq = _dq;
+    VUF_DBG("");
+
+    /* XXX: if we are here, we must have some event, right? */
+    // virtio_irq(vq);
+    // virtio_notify_vector(vq->vdev, vq->vector);
+    // EventNotifier *notifier = virtio_queue_get_guest_notifier(vq);
+    virtio_notify(dq->vd, dq->vq);
+}
+
+static int virtio_xenbus_set_guest_notifier(VirtioXenDevice *vxd, int n, bool assign)
+{
+    VirtIODevice *vd = vxd->vd;
+    VirtQueue *vq = virtio_get_queue(vd, n);
+
+    VUF_DBG("");
+
+    // FIXME: leaked
+    DeviceAndQueue *dq = g_malloc0(sizeof(DeviceAndQueue));
+    dq->vd = vd;
+    dq->vq = vq;
+
+    if (assign) {
+        qemu_set_fd_handler(qemu_xen_evtchn_fd(vxd->evtchn),
+                            virtio_xenbus_guest_notifier_read,
+                            NULL, dq);
+    } else {
+        qemu_set_fd_handler(qemu_xen_evtchn_fd(vxd->evtchn),
+                            NULL, NULL, NULL);
+    }
+
+    return 0;
+}
+
+static int virtio_xenbus_set_guest_notifiers(DeviceState *d, int nvqs,
+                                             bool assigned)
+{
+    VUF_DBG("");
+
+    VirtioXenDevice *vxd = VIRTIO_XEN_DEVICE(d);
+    VirtIODevice *vd = vxd->vd;
+    int ret, n;
+
+    for (n = 0; n < VIRTIO_QUEUE_MAX; n++) {
+        if (!virtio_queue_get_num(vd, n)) {
+            break;
+        }
+
+        ret = virtio_xenbus_set_guest_notifier(vxd, n, assigned);
+        if (ret < 0) {
+            goto assign_error;
+        }
+    }
+
+    return 0;
+
+assign_error:
+    while (--n >= 0) {
+        virtio_xenbus_set_guest_notifier(vxd, n, !assigned);
+    }
+    return ret;
+}
+
+/*
+ * Assigns/deassigns the ioeventfd backing for the transport on
+ * the device for queue number n. Returns an error value on
+ * failure.
+ */
+static int UNUSED virtio_xenbus_ioeventfd_assign(DeviceState *d, EventNotifier *notifier,
+                                          int n, bool assign)
+{
+    // NOTE: the ccw implementation forwards this directly to a KVM ioctl
+    // What are we supposed to do being on Xen?
+
+    VUF_DBG("DeviceState %p EventNotifier %p n %d assign %s",
+            d, notifier, n, assign ? "true" : "false");
+    return 0;
+}
+
+static bool UNUSED virtio_xenbus_ioeventfd_enabled(DeviceState *d)
+{
+    VUF_DBG("returning false");
+    return false;
 }
 
 static void virtio_xen_bus_class_init(ObjectClass *klass, void *data)
@@ -634,21 +747,24 @@ static void virtio_xen_bus_class_init(ObjectClass *klass, void *data)
 
     bus_class->max_dev = 1;
 
-    k->notify = virtio_xen_notify; // FIXME: how different from the notify evtchn?
-    k->save_config = virtio_xen_save_config;
-    k->load_config = virtio_xen_load_config;
-    k->save_queue = virtio_xen_save_queue;
-    k->load_queue = virtio_xen_load_queue;
+    // NOTE: Find callback decl in virtio-bus.h
+
+    k->notify = virtio_xenbus_notify; // FIXME: how different from the notify evtchn?
+    k->save_config = virtio_xenbus_save_config;
+    k->load_config = virtio_xenbus_load_config;
+    // k->save_queue = virtio_xenbus_save_queue;
+    // k->load_queue = virtio_xenbus_load_queue;
 
     // TODO: implement more of these
-    // ?? k->save_extra_state = virtio_xen_save_extra_state;
-    // ?? k->load_extra_state = virtio_xen_load_extra_state;
-    // ?? k->has_extra_state = virtio_xen_has_extra_state;
-    k->set_guest_notifiers = virtio_xen_set_guest_notifiers;
-    // k->ioeventfd_enabled = virtio_xen_ioeventfd_enabled;
-    // k->ioeventfd_assign = virtio_xen_ioeventfd_assign;
-    // k->pre_plugged = virtio_xen_pre_plugged;
-    // k->vmstate_change = virtio_xen_vmstate_change;
+
+    // ?? k->save_extra_state = virtio_xenbus_save_extra_state;
+    // ?? k->load_extra_state = virtio_xenbus_load_extra_state;
+    // ?? k->has_extra_state = virtio_xenbus_has_extra_state;
+    k->set_guest_notifiers = virtio_xenbus_set_guest_notifiers;
+    k->ioeventfd_enabled = virtio_xenbus_ioeventfd_enabled;
+    k->ioeventfd_assign = virtio_xenbus_ioeventfd_assign;
+    // k->pre_plugged = virtio_xenbus_pre_plugged;
+    // k->vmstate_change = virtio_xenbus_vmstate_change;
     // k->has_variable_vring_alignment = true;
 }
 

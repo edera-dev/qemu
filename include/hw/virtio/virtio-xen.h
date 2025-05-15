@@ -132,9 +132,6 @@ struct VirtioXenDevice {
 
     uint64_t host_features;
 
-    xenevtchn_handle *evtchn; // TODO: remove, not needed
-    xengnttab_handle *gnttab; // TODO: remove, not needed
-
     // virtqueue
     evtchn_port_t notify_local;
     evtchn_port_t notify_remote;
@@ -145,8 +142,17 @@ struct VirtioXenDevice {
     struct VirtioConfigPage *conf_page;
 
     // NOTE: I think the modern API uses this new type
+    // [XenEventChannel] has internal members of type
+    // xenevtchn_handle
     XenEventChannel *notify;
     XenEventChannel *conf;
+
+    // TODO: do we use these? or the above?
+    // VirtioDevice seems to have its own internal handles
+    // We aren't using these at this time
+    xenevtchn_handle *evtchn; // TODO: remove, not needed
+    xengnttab_handle *gnttab; // TODO: remove, not needed
+
 };
 
 #endif
