@@ -2357,6 +2357,7 @@ void virtio_reset(void *opaque)
 
 void virtio_queue_set_addr(VirtIODevice *vdev, int n, hwaddr addr)
 {
+    printf("[INTERNAL] %s: vd %p n %d hwaddr %#lx\n", __func__, vdev, n, addr);
     if (!vdev->vq[n].vring.num) {
         return;
     }

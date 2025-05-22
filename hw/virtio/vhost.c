@@ -143,9 +143,12 @@ bool vhost_dev_has_iommu(struct vhost_dev *dev)
      * which may cause unnecessary IOTLB miss/update transactions.
      */
     if (vdev) {
-        return virtio_bus_device_iommu_enabled(vdev) &&
-            virtio_host_has_feature(vdev, VIRTIO_F_IOMMU_PLATFORM);
+        bool en = virtio_bus_device_iommu_enabled(vdev);
+        bool feat = virtio_host_has_feature(vdev, VIRTIO_F_IOMMU_PLATFORM);
+        printf("%s: iommu enabled %d feat IOMMU_PLAT %d vd %p\n", __func__, en, feat, vdev);
+        return en && feat;
     } else {
+        printf("%s: false\n", __func__);
         return false;
     }
 }
@@ -461,8 +464,10 @@ static void *vhost_memory_map(struct vhost_dev *dev, hwaddr addr,
                               hwaddr *plen, bool is_write)
 {
     if (!vhost_dev_has_iommu(dev)) {
+        printf("[INTERNAL] %s: !vhost_dev_has_iommu -> cpu_physical_memory_map\n", __func__);
         return cpu_physical_memory_map(addr, plen, is_write);
     } else {
+        printf("[INTERNAL] %s: vhost_dev_has_iommu, return immediate with %p\n", __func__);
         return (void *)(uintptr_t)addr;
     }
 }
@@ -1258,6 +1263,7 @@ int vhost_virtqueue_start(struct vhost_dev *dev,
     VirtioBusClass *k = VIRTIO_BUS_GET_CLASS(vbus);
     hwaddr s, l, a;
     int r;
+    printf("[INTERNAL] %s: enter vq %p idx %u\n", __func__, vq, idx);
     int vhost_vq_index = dev->vhost_ops->vhost_get_vq_index(dev, idx);
     struct vhost_vring_file file = {
         .index = vhost_vq_index
@@ -1273,6 +1279,7 @@ int vhost_virtqueue_start(struct vhost_dev *dev,
         return 0;
     }
 
+    printf("[INTERNAL] %s: -> vhost_set_vring_num\n", __func__);
     vq->num = state.num = virtio_queue_get_num(vdev, idx);
     r = dev->vhost_ops->vhost_set_vring_num(dev, &state);
     if (r) {
@@ -1280,6 +1287,7 @@ int vhost_virtqueue_start(struct vhost_dev *dev,
         return r;
     }
 
+    printf("[INTERNAL] %s: -> vhost_set_vring_base\n", __func__);
     state.num = virtio_queue_get_last_avail_idx(vdev, idx);
     r = dev->vhost_ops->vhost_set_vring_base(dev, &state);
     if (r) {
@@ -1296,8 +1304,10 @@ int vhost_virtqueue_start(struct vhost_dev *dev,
         }
     }
 
+    printf("[INTERNAL] %s: -> virtio_queue_get_desc_size\n", __func__);
     vq->desc_size = s = l = virtio_queue_get_desc_size(vdev, idx);
     vq->desc_phys = a;
+    printf("[INTERNAL] %s:%lu: -> vhost_memory_map\n", __func__, __LINE__);
     vq->desc = vhost_memory_map(dev, a, &l, false);
     if (!vq->desc || l != s) {
         r = -ENOMEM;
@@ -1305,6 +1315,7 @@ int vhost_virtqueue_start(struct vhost_dev *dev,
     }
     vq->avail_size = s = l = virtio_queue_get_avail_size(vdev, idx);
     vq->avail_phys = a = virtio_queue_get_avail_addr(vdev, idx);
+    printf("[INTERNAL] %s:%lu: -> vhost_memory_map\n", __func__, __LINE__);
     vq->avail = vhost_memory_map(dev, a, &l, false);
     if (!vq->avail || l != s) {
         r = -ENOMEM;
@@ -1312,24 +1323,29 @@ int vhost_virtqueue_start(struct vhost_dev *dev,
     }
     vq->used_size = s = l = virtio_queue_get_used_size(vdev, idx);
     vq->used_phys = a = virtio_queue_get_used_addr(vdev, idx);
+    printf("[INTERNAL] %s:%lu: -> vhost_memory_map\n", __func__, __LINE__);
     vq->used = vhost_memory_map(dev, a, &l, true);
     if (!vq->used || l != s) {
         r = -ENOMEM;
         goto fail_alloc_used;
     }
 
+    printf("[INTERNAL] %s:%lu: -> vhost_virtqueue_set_addr\n", __func__, __LINE__);
     r = vhost_virtqueue_set_addr(dev, vq, vhost_vq_index, dev->log_enabled);
     if (r < 0) {
         goto fail_alloc;
     }
 
+    printf("[INTERNAL] %s:%lu: -> event_notifier_get_fd\n", __func__, __LINE__);
     file.fd = event_notifier_get_fd(virtio_queue_get_host_notifier(vvq));
+    printf("[INTERNAL] %s:%lu: -> vhost_set_vring_kick\n", __func__, __LINE__);
     r = dev->vhost_ops->vhost_set_vring_kick(dev, &file);
     if (r) {
         VHOST_OPS_DEBUG(r, "vhost_set_vring_kick failed");
         goto fail_kick;
     }
 
+    printf("[INTERNAL] %s:%lu: -> event_notifier_test_and_clear\n", __func__, __LINE__);
     /* Clear and discard previous events if any. */
     event_notifier_test_and_clear(&vq->masked_notifier);
 
@@ -1345,12 +1361,14 @@ int vhost_virtqueue_start(struct vhost_dev *dev,
         k->query_guest_notifiers(qbus->parent) &&
         virtio_queue_vector(vdev, idx) == VIRTIO_NO_VECTOR) {
         file.fd = -1;
+        printf("[INTERNAL] %s:%lu: -> vhost_set_vring_call\n", __func__, __LINE__);
         r = dev->vhost_ops->vhost_set_vring_call(dev, &file);
         if (r) {
             goto fail_vector;
         }
     }
 
+    printf("[INTERNAL] %s: return ok\n", __func__);
     return 0;
 
 fail_vector:
@@ -2079,21 +2097,25 @@ int vhost_dev_start(struct vhost_dev *hdev, VirtIODevice *vdev, bool vrings)
     hdev->started = true;
     hdev->vdev = vdev;
 
+    printf("[INTERNAL] %s: enter. -> vhost_dev_set_features\n", __func__);
     r = vhost_dev_set_features(hdev, hdev->log_enabled);
     if (r < 0) {
         goto fail_features;
     }
 
+    printf("[INTERNAL] %s: -> vhost_dev_has_iommu\n", __func__);
     if (vhost_dev_has_iommu(hdev)) {
         memory_listener_register(&hdev->iommu_listener, vdev->dma_as);
     }
 
+    printf("[INTERNAL] %s: -> vhost_set_mem_table\n", __func__);
     r = hdev->vhost_ops->vhost_set_mem_table(hdev, hdev->mem);
     if (r < 0) {
         VHOST_OPS_DEBUG(r, "vhost_set_mem_table failed");
         goto fail_mem;
     }
     for (i = 0; i < hdev->nvqs; ++i) {
+        printf("[INTERNAL] %s: -> vhost_virtqueue_start\n", __func__);
         r = vhost_virtqueue_start(hdev,
                                   vdev,
                                   hdev->vqs + i,
@@ -2103,12 +2125,14 @@ int vhost_dev_start(struct vhost_dev *hdev, VirtIODevice *vdev, bool vrings)
         }
     }
 
+    printf("[INTERNAL] %s: -> event_notifier_init\n", __func__);
     r = event_notifier_init(
         &hdev->vqs[VHOST_QUEUE_NUM_CONFIG_INR].masked_config_notifier, 0);
     if (r < 0) {
         VHOST_OPS_DEBUG(r, "event_notifier_init failed");
         goto fail_vq;
     }
+    printf("[INTERNAL] %s: -> event_notifier_test_and_clear\n", __func__);
     event_notifier_test_and_clear(
         &hdev->vqs[VHOST_QUEUE_NUM_CONFIG_INR].masked_config_notifier);
     if (!vdev->use_guest_notifier_mask) {
@@ -2132,6 +2156,7 @@ int vhost_dev_start(struct vhost_dev *hdev, VirtIODevice *vdev, bool vrings)
         vhost_dev_elect_mem_logger(hdev, true);
     }
     if (vrings) {
+        printf("[INTERNAL] %s: vrings == T -> vhost_dev_set_vring_enable\n", __func__);
         r = vhost_dev_set_vring_enable(hdev, true);
         if (r) {
             goto fail_log;
@@ -2155,6 +2180,7 @@ int vhost_dev_start(struct vhost_dev *hdev, VirtIODevice *vdev, bool vrings)
         }
     }
     vhost_start_config_intr(hdev);
+    printf("[INTERNAL] %s: return ok\n", __func__);
     return 0;
 fail_start:
     if (vrings) {

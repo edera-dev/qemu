@@ -1015,6 +1015,9 @@ static int vhost_user_set_mem_table(struct vhost_dev *dev,
                            VHOST_USER_PROTOCOL_F_CONFIGURE_MEM_SLOTS);
     int ret;
 
+    printf("[INTERNAL] %s config_mem_slots %d do_postcopy %d \n", __func__,
+           config_mem_slots, do_postcopy);
+
     if (do_postcopy) {
         /*
          * Postcopy has enough differences that it's best done in it's own
@@ -1035,17 +1038,20 @@ static int vhost_user_set_mem_table(struct vhost_dev *dev,
     if (config_mem_slots) {
         ret = vhost_user_add_remove_regions(dev, &msg, reply_supported, false);
         if (ret < 0) {
+            printf("[INTERNAL] %s %d <- vhost_user_add_remove_regions\n", __func__, ret);
             return ret;
         }
     } else {
         ret = vhost_user_fill_set_mem_table_msg(u, dev, &msg, fds, &fd_num,
                                                 false);
         if (ret < 0) {
+            printf("[INTERNAL] %s %d <- vhost_user_fill_set_mem_table_msg\n", __func__, ret);
             return ret;
         }
 
         ret = vhost_user_write(dev, &msg, fds, fd_num);
         if (ret < 0) {
+            printf("[INTERNAL] %s %d <- vhost_user_write\n", __func__, ret);
             return ret;
         }
 

@@ -2248,6 +2248,7 @@ static void *qemu_ram_ptr_length(RAMBlock *block, ram_addr_t addr,
                                  bool is_write)
 {
     hwaddr len = 0;
+    printf("%s:\n", __func__);
 
     if (size && *size == 0) {
         return NULL;
@@ -2263,6 +2264,7 @@ static void *qemu_ram_ptr_length(RAMBlock *block, ram_addr_t addr,
     }
 
     if (xen_enabled() && block->host == NULL) {
+        printf("%s: xen_enabled && block->host == NULL\n", __func__);
         /* We need to check if the requested address is in the RAM
          * because we don't want to map the entire memory in QEMU.
          * In that case just map the requested area.
@@ -2279,6 +2281,7 @@ static void *qemu_ram_ptr_length(RAMBlock *block, ram_addr_t addr,
                                     1, lock, is_write);
     }
 
+    printf("%s: -> ramblock_ptr\n", __func__);
     return ramblock_ptr(block, addr);
 }
 
@@ -3239,6 +3242,8 @@ void *address_space_map(AddressSpace *as,
     MemoryRegion *mr;
     FlatView *fv;
 
+    printf("%s:\n", __func__);
+
     trace_address_space_map(as, addr, len, is_write, *(uint32_t *) &attrs);
 
     if (len == 0) {
@@ -3253,6 +3258,8 @@ void *address_space_map(AddressSpace *as,
     if (!memory_access_is_direct(mr, is_write)) {
         if (qatomic_xchg(&as->bounce.in_use, true)) {
             *plen = 0;
+            // XXX: FAILS HERE
+            printf("%s:%lu: exit NULL\n", __func__, __LINE__);
             return NULL;
         }
         /* Avoid unbounded allocations */
@@ -3269,6 +3276,7 @@ void *address_space_map(AddressSpace *as,
         }
 
         *plen = l;
+        printf("%s:%lu: exit with %p\n", __func__, __LINE__, as->bounce.buffer);
         return as->bounce.buffer;
     }
 
@@ -3277,6 +3285,7 @@ void *address_space_map(AddressSpace *as,
     *plen = flatview_extend_translation(fv, addr, len, mr, xlat,
                                         l, is_write, attrs);
     fuzz_dma_read_cb(addr, *plen, mr);
+    printf("%s:%lu: -> qemu_ram_ptr_length\n", __func__, __LINE__);
     return qemu_ram_ptr_length(mr->ram_block, xlat, plen, true, is_write);
 }
 

@@ -59,23 +59,28 @@ static void vuf_start(VirtIODevice *vdev)
     int ret;
     int i;
 
+    printf("[INTERNAL] %s: enter. check set_guest_notifiers\n", __func__);
+
     if (!k->set_guest_notifiers) {
         error_report("binding does not support guest notifiers");
         return;
     }
 
+    printf("[INTERNAL] %s: -> vhost_dev_enable_notifiers\n", __func__);
     ret = vhost_dev_enable_notifiers(&fs->vhost_dev, vdev);
     if (ret < 0) {
         error_report("Error enabling host notifiers: %d", -ret);
         return;
     }
 
+    printf("[INTERNAL] %s: -> set_guest_notifiers\n", __func__);
     ret = k->set_guest_notifiers(qbus->parent, fs->vhost_dev.nvqs, true);
     if (ret < 0) {
         error_report("Error binding guest notifier: %d", -ret);
         goto err_host_notifiers;
     }
 
+    printf("[INTERNAL] %s: -> vhost_dev_start\n", __func__);
     fs->vhost_dev.acked_features = vdev->guest_features;
     ret = vhost_dev_start(&fs->vhost_dev, vdev, true);
     if (ret < 0) {
@@ -92,6 +97,7 @@ static void vuf_start(VirtIODevice *vdev)
         vhost_virtqueue_mask(&fs->vhost_dev, vdev, i, false);
     }
 
+    printf("[INTERNAL] %s: end ok\n", __func__);
     return;
 
 err_guest_notifiers:
