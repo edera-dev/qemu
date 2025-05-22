@@ -1269,6 +1269,7 @@ static void virtio_ccw_bus_class_init(ObjectClass *klass, const void *data)
 
     bus_class->max_dev = 1;
     k->notify = virtio_ccw_notify;
+    // NOTE: many of these callbacks were originally set with virtio_bind_device
     k->vmstate_change = virtio_ccw_vmstate_change;
     k->query_guest_notifiers = virtio_ccw_query_guest_notifiers;
     k->set_guest_notifiers = virtio_ccw_set_guest_notifiers;
@@ -1293,6 +1294,7 @@ static const TypeInfo virtio_ccw_bus_info = {
 
 static void virtio_ccw_register(void)
 {
+    printf("%s\n", __func__);
     type_register_static(&virtio_ccw_bus_info);
     type_register_static(&virtio_ccw_device_info);
 }

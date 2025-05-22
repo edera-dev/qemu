@@ -63,6 +63,7 @@ static void xen_init_pv(MachineState *machine)
 
 static void xenpv_machine_init(MachineClass *mc)
 {
+    printf("%s\n", __func__);
     mc->desc = "Xen Para-virtualized PC";
     mc->init = xen_init_pv;
     mc->max_cpus = 1;

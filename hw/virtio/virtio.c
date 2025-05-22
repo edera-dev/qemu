@@ -179,7 +179,7 @@ const char *virtio_device_names[] = {
     [VIRTIO_ID_IOMMU] = "virtio-iommu",
     [VIRTIO_ID_MEM] = "virtio-mem",
     [VIRTIO_ID_SOUND] = "virtio-sound",
-    [VIRTIO_ID_FS] = "virtio-user-fs",
+    [VIRTIO_ID_FS] = "virtio-user-fs", // XXX: do we conflict?
     [VIRTIO_ID_PMEM] = "virtio-pmem",
     [VIRTIO_ID_RPMB] = "virtio-rpmb",
     [VIRTIO_ID_MAC80211_HWSIM] = "virtio-mac-hwsim",
@@ -2322,6 +2322,7 @@ void virtio_queue_enable(VirtIODevice *vdev, uint32_t queue_index)
 
 void virtio_queue_set_addr(VirtIODevice *vdev, int n, hwaddr addr)
 {
+    printf("[INTERNAL] %s: vd %p n %d hwaddr %#lx\n", __func__, vdev, n, addr);
     if (!vdev->vq[n].vring.num) {
         return;
     }
