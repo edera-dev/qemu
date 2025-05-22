@@ -738,6 +738,11 @@ static bool UNUSED virtio_xenbus_ioeventfd_enabled(DeviceState *d)
     return false;
 }
 
+static bool UNUSED virtio_xenbus_iommu_enabled(DeviceState *d)
+{
+    return true; // FIXME: ???
+}
+
 static void virtio_xen_bus_class_init(ObjectClass *klass, void *data)
 {
     qemu_printf("%s: bus -> set up method callbacks\n", __func__);
@@ -754,6 +759,7 @@ static void virtio_xen_bus_class_init(ObjectClass *klass, void *data)
     k->load_config = virtio_xenbus_load_config;
     // k->save_queue = virtio_xenbus_save_queue;
     // k->load_queue = virtio_xenbus_load_queue;
+    // k->iommu_enabled = virtio_xenbus_iommu_enabled; // NOTE: careful with this one
 
     // TODO: implement more of these
 
