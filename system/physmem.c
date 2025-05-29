@@ -3409,7 +3409,7 @@ void *address_space_map(AddressSpace *as,
     MemoryRegion *mr;
     FlatView *fv;
 
-    printf("%s:\n", __func__);
+    printf("%s: addr %#lx len %lu is_write %d\n", __func__, addr, len, is_write);
 
     trace_address_space_map(as, addr, len, is_write, *(uint32_t *) &attrs);
 
@@ -3423,6 +3423,7 @@ void *address_space_map(AddressSpace *as,
     mr = flatview_translate(fv, addr, &xlat, &l, is_write, attrs);
 
     if (!memory_access_is_direct(mr, is_write, attrs)) {
+        printf("%s:    memory_access_is_direct\n", __func__);
         size_t used = qatomic_read(&as->bounce_buffer_size);
         for (;;) {
             hwaddr alloc = MIN(as->max_bounce_buffer_size - used, l);
@@ -3437,6 +3438,7 @@ void *address_space_map(AddressSpace *as,
         }
 
         if (l == 0) {
+            printf("%s:    returning nullptr\n", __func__);
             *plen = 0;
             return NULL;
         }
@@ -3448,6 +3450,7 @@ void *address_space_map(AddressSpace *as,
         bounce->addr = addr;
         bounce->len = l;
 
+        printf("%s:    allocated bounce buffer\n", __func__);
         if (!is_write) {
             flatview_read(fv, addr, attrs,
                           bounce->buffer, l);
@@ -3461,7 +3464,6 @@ void *address_space_map(AddressSpace *as,
     *plen = flatview_extend_translation(fv, addr, len, mr, xlat,
                                         l, is_write, attrs);
     fuzz_dma_read_cb(addr, *plen, mr);
-    printf("%s:%lu: -> qemu_ram_ptr_length\n", __func__, __LINE__);
     return qemu_ram_ptr_length(mr->ram_block, xlat, plen, true, is_write);
 }
 

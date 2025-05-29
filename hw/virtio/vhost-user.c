@@ -386,6 +386,8 @@ static int vhost_user_write(struct vhost_dev *dev, VhostUserMsg *msg,
     CharBackend *chr = u->user->chr;
     int ret, size = VHOST_USER_HDR_SIZE + msg->hdr.size;
 
+    printf("[INTERNAL] %s: msg %d ---------> viritofsd\n", __func__, msg->hdr.request);
+
     /*
      * Some devices, like virtio-scsi, are implemented as a single vhost_dev,
      * while others, like virtio-net, contain multiple vhost_devs. For
@@ -488,6 +490,8 @@ static MemoryRegion *vhost_user_get_mr_data(uint64_t addr, ram_addr_t *offset,
     *fd = memory_region_get_fd(mr);
     *offset += mr->ram_block->fd_offset;
 
+    printf("[INTERNAL] %s fd %d offset %p\n", __func__, fd, offset);
+
     return mr;
 }
 
@@ -513,6 +517,8 @@ static int vhost_user_fill_set_mem_table_msg(struct vhost_user *u,
     MemoryRegion *mr;
     struct vhost_memory_region *reg;
     VhostUserMemoryRegion region_buffer;
+
+    printf("[INTERNAL] %s\n", __func__);
 
     msg->hdr.request = VHOST_USER_SET_MEM_TABLE;
 
@@ -580,6 +586,9 @@ static void scrub_shadow_regions(struct vhost_dev *dev,
     ram_addr_t offset;
     MemoryRegion *mr;
     bool matching;
+
+    printf("[INTERNAL] %s nregions %d num_shadow_regions %d\n", __func__,
+           dev->mem->nregions, u->num_shadow_regions);
 
     /*
      * Find memory regions present in our shadow state which are not in
@@ -723,6 +732,8 @@ static int send_add_regions(struct vhost_dev *dev,
     VhostUserMsg msg_reply;
     VhostUserMemoryRegion region_buffer;
 
+    printf("[INTERNAL] %s nr_add_reg %d\n", __func__, nr_add_reg);
+
     for (i = 0; i < nr_add_reg; i++) {
         reg = add_reg[i].region;
         reg_idx = add_reg[i].reg_idx;
@@ -730,6 +741,7 @@ static int send_add_regions(struct vhost_dev *dev,
 
         mr = vhost_user_get_mr_data(reg->userspace_addr, &offset, &fd);
 
+        printf("[INTERNAL] %s fd %d\n", __func__, fd);
         if (fd > 0) {
             if (track_ramblocks) {
                 trace_vhost_user_set_mem_table_withfd(reg_fd_idx, mr->name,
@@ -834,12 +846,15 @@ static int vhost_user_add_remove_regions(struct vhost_dev *dev,
     int nr_add_reg, nr_rem_reg;
     int ret;
 
+    printf("[INTERNAL] %s\n", __func__);
+
     msg->hdr.size = sizeof(msg->payload.mem_reg);
 
     /* Find the regions which need to be removed or added. */
     scrub_shadow_regions(dev, add_reg, &nr_add_reg, rem_reg, &nr_rem_reg,
                          shadow_pcb, track_ramblocks);
 
+    printf("[INTERNAL]     %s: nr_add_reg %d\n", __func__, nr_add_reg);
     if (nr_rem_reg) {
         ret = send_remove_regions(dev, rem_reg, nr_rem_reg, msg,
                                   reply_supported);
@@ -896,6 +911,8 @@ static int vhost_user_set_mem_table_postcopy(struct vhost_dev *dev,
     VhostUserMsg msg_reply;
     int region_i, msg_i;
     int ret;
+
+    printf("[INTERNAL] %s\n", __func__);
 
     VhostUserMsg msg = {
         .hdr.flags = VHOST_USER_VERSION,
@@ -1088,6 +1105,7 @@ static int vhost_user_get_u64(struct vhost_dev *dev, int request, uint64_t *u64)
         .hdr.request = request,
         .hdr.flags = VHOST_USER_VERSION,
     };
+    printf("[INTERNAL] %s\n", __func__);
 
     if (vhost_user_per_device_request(request) && dev->vq_index != 0) {
         return 0;
@@ -1300,6 +1318,7 @@ static int vhost_user_get_vring_base(struct vhost_dev *dev,
     };
     struct vhost_user *u = dev->opaque;
 
+    printf("[INTERNAL] %s\n", __func__);
     VhostUserHostNotifier *n = fetch_notifier(u->user, ring->index);
     vhost_user_host_notifier_remove(n, dev->vdev, false);
 
@@ -1694,6 +1713,7 @@ int vhost_user_get_shared_object(struct vhost_dev *dev, unsigned char *uuid,
     };
     memcpy(msg.payload.object.uuid, uuid, sizeof(msg.payload.object.uuid));
 
+    printf("[INTERNAL] %s\n", __func__);
     ret = vhost_user_write(dev, &msg, NULL, 0);
     if (ret < 0) {
         return ret;
@@ -2017,6 +2037,7 @@ static int vhost_user_postcopy_advise(struct vhost_dev *dev, Error **errp)
         .hdr.request = VHOST_USER_POSTCOPY_ADVISE,
         .hdr.flags = VHOST_USER_VERSION,
     };
+    printf("[INTERNAL] %s\n", __func__);
 
     ret = vhost_user_write(dev, &msg, NULL, 0);
     if (ret < 0) {
@@ -2444,6 +2465,7 @@ static int vhost_user_get_config(struct vhost_dev *dev, uint8_t *config,
         .hdr.flags = VHOST_USER_VERSION,
         .hdr.size = VHOST_USER_CONFIG_HDR_SIZE + config_len,
     };
+    printf("[INTERNAL] %s\n", __func__);
 
     if (!virtio_has_feature(dev->protocol_features,
                 VHOST_USER_PROTOCOL_F_CONFIG)) {
@@ -2681,6 +2703,7 @@ static int vhost_user_get_inflight_fd(struct vhost_dev *dev,
         .payload.inflight.queue_size = queue_size,
         .hdr.size = sizeof(msg.payload.inflight),
     };
+    printf("[INTERNAL] %s\n", __func__);
 
     if (!virtio_has_feature(dev->protocol_features,
                             VHOST_USER_PROTOCOL_F_INFLIGHT_SHMFD)) {
@@ -2908,6 +2931,7 @@ static int vhost_user_set_device_state_fd(struct vhost_dev *dev,
             .phase = phase,
         },
     };
+    printf("[INTERNAL] %s\n", __func__);
 
     *reply_fd = -1;
 
@@ -2974,6 +2998,7 @@ static int vhost_user_check_device_state(struct vhost_dev *dev, Error **errp)
             .size = 0,
         },
     };
+    printf("[INTERNAL] %s\n", __func__);
 
     if (!vhost_user_supports_device_state(dev)) {
         error_setg(errp, "Back-end does not support migration state transfer");

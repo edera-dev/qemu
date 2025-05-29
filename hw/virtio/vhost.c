@@ -640,6 +640,8 @@ static void vhost_commit(MemoryListener *listener)
     int i;
     bool changed = false;
 
+    printf("[INTERNAL] %s\n", __func__);
+
     /* Note we can be called before the device is started, but then
      * starting the device calls set_mem_table, so we need to have
      * built the data structures.
@@ -671,7 +673,7 @@ static void vhost_commit(MemoryListener *listener)
     regions_size = offsetof(struct vhost_memory, regions) +
                        dev->n_mem_sections * sizeof dev->mem->regions[0];
     dev->mem = g_realloc(dev->mem, regions_size);
-    dev->mem->nregions = dev->n_mem_sections;
+    dev->mem->nregions = dev->n_mem_sections; // XXX: vhost_user_add_remove_regions
 
     if (dev->vhost_ops->vhost_backend_no_private_memslots &&
         dev->vhost_ops->vhost_backend_no_private_memslots(dev)) {
@@ -755,6 +757,8 @@ static void vhost_region_add_section(struct vhost_dev *dev,
     uintptr_t mrs_host = (uintptr_t)memory_region_get_ram_ptr(section->mr) +
                          section->offset_within_region;
     RAMBlock *mrs_rb = section->mr->ram_block;
+
+    printf("[INTERNAL] %s\n", __func__);
 
     trace_vhost_region_add_section(section->mr->name, mrs_gpa, mrs_size,
                                    mrs_host);

@@ -43,6 +43,9 @@
 
 #define UNUSED __attribute__((__unused__))
 
+struct pfn_desc { uint64_t desc; uint64_t avail; uint64_t used; };
+typedef struct pfn_desc pfn_desc;
+
 static void virtio_xen_device_realize(XenDevice *, Error **);
 static void virtio_xen_device_unrealize(XenDevice *);
 static bool virtio_xen_event(void *);
@@ -380,192 +383,191 @@ static void virtio_xen_device_unrealize(XenDevice *xd)
     vxd->conf_page = NULL;
 }
 
-// @pre [vxd->conf_page.size] is 1,2,4,8
-static bool virtio_event_read(VirtioXenDevice *vxd)
+static bool virtio_event_read_driver(VirtioXenDevice *vxd)
 {
-    VirtIODevice *vd = vxd->vd;
     struct VirtioConfigPage *conf = vxd->conf_page;
-    uint64_t val = 0;
-    int size, offset;
+    VirtIODevice *vd = vxd->vd;
 
-    // FIXME: Check offset does not exceed config buffer
-    offset = conf->offset;
-    size = conf->size;
+    uint64_t val;
+    uint32_t offset = conf->offset;
 
-    //VUF_DBG("offset %d size %d", offset, size);
-
-    if (offset < VIRTIO_XENBUS_CONFIG_OFF) {
-        switch (offset) {
-        case VIRTIO_XENBUS_HOST_FEATURES:
-            val = vd->host_features;
-            VUF_DBG("host_features %#lx", val);
-            break;
-        case VIRTIO_XENBUS_GUEST_FEATURES:
-            val = vd->guest_features;
-            VUF_DBG("guest_features %#lx", val);
-            break;
-        case VIRTIO_XENBUS_QUEUE_PFN:
-            val = virtio_queue_get_addr(vd, vd->queue_sel)
-                >> VIRTIO_XENBUS_QUEUE_ADDR_SHIFT;
-            VUF_DBG("queue_pfn %#lx", val);
-            break;
-        case VIRTIO_XENBUS_QUEUE_NUM:
-            val = virtio_queue_get_num(vd, vd->queue_sel);
-            VUF_DBG("queue_num %#lx", val);
-            break;
-        case VIRTIO_XENBUS_QUEUE_SEL:
-            val = vd->queue_sel;
-            VUF_DBG("queue_sel %#lx", val);
-            break;
-        case VIRTIO_XENBUS_STATUS:
-            val = vd->status;
-            VUF_DBG("status %#lx", val);
-            break;
-        case VIRTIO_XENBUS_ISR:
-            val = vd->isr;
-            vd->isr = 0;
-            VUF_DBG("isr %#lx", val);
-            break;
-        default:
-            error_report("%s: unexpected offset %d value %ld %#lx",
-                         __func__, offset, val, val);
-            break;
-        }
-    } else {
-        uint32_t off = offset - VIRTIO_XENBUS_CONFIG_OFF;
-        switch (size) {
-        case 1:
-            val = virtio_config_readb(vd, off);
-            break;
-        case 2:
-            val = virtio_config_readw(vd, off);
-            break;
-        case 4:
-            val = virtio_config_readl(vd, off);
-            break;
-        case 8:
-            // FIXME:
-            // "2.5.1 Driver Requirements: Device Configuration Space
-            // Drivers MUST NOT assume reads from fields greater than
-            // 32 bits wide are atomic, nor are reads from
-            // multiple fields"
-            val = (uint64_t)virtio_config_readl(vd, off) << 32;
-            val |= virtio_config_readl(vd, off + 4);
-            break;
-        }
-    }
-
-    //VUF_DBG("val %lu %#lx", val, val);
-
-    // config page in guest is only a shadow
-    switch (size) {
+    switch (conf->size) {
     case 1:
-        *((uint8_t *)&conf->config[offset]) = (uint8_t)val;
+        val = virtio_config_readb(vd, offset);
+        memcpy(conf->driver + offset, &val, 1);
         break;
     case 2:
-        *((uint16_t *)&conf->config[offset]) = (uint16_t)val;
+        val = virtio_config_readw(vd, offset);
+        memcpy(conf->driver + offset, &val, 2);
         break;
     case 4:
-        *((uint32_t *)&conf->config[offset]) = (uint32_t)val;
+        val = virtio_config_readl(vd, offset);
+        memcpy(conf->driver + offset, &val, 4);
         break;
     case 8:
-        *((uint64_t *)&conf->config[offset]) = (uint64_t)val;
+        val = virtio_config_readq(vd, offset);
+        memcpy(conf->driver + offset, &val, 8);
         break;
+    default:
+        error_report("%s: unexpected size %u", __func__, conf->size);
+        return false;
     }
 
     return true;
 }
 
-// @pre [vxd->conf_page.size] is 1,2,4,8
+static bool virtio_event_read(VirtioXenDevice *vxd)
+{
+    VirtIODevice *vd = vxd->vd;
+    struct VirtioConfigPage *conf = vxd->conf_page;
+
+    uint64_t val;
+    uint32_t cmd_code;
+    pfn_desc *q;
+
+    cmd_code = conf->cmd_code;
+
+    //VUF_DBG("offset %d size %d", offset, size);
+
+    if (cmd_code == VX_CMD_CONFIG)
+        return virtio_event_read_driver(vxd);
+
+    switch (cmd_code) {
+    case VIRTIO_XENBUS_HOST_FEATURES:
+        val = vd->host_features;
+        VUF_DBG("host_features %#lx", val);
+        memcpy(conf->device, &val, 8);
+        break;
+    case VIRTIO_XENBUS_GUEST_FEATURES:
+        val = vd->guest_features;
+        VUF_DBG("guest_features %#lx", val);
+        memcpy(conf->device, &val, 8);
+        break;
+    case VIRTIO_XENBUS_QUEUE_PFN:
+        q = (pfn_desc *)conf->device;
+        q->desc = virtio_queue_get_desc_addr(vd, vd->queue_sel);
+        q->avail = virtio_queue_get_avail_addr(vd, vd->queue_sel);
+        q->used = virtio_queue_get_used_addr(vd, vd->queue_sel);
+        VUF_DBG("queue_pfn desc %#lx avail %#lx used %#lx",
+                q->desc, q->avail, q->used);
+        break;
+    case VIRTIO_XENBUS_QUEUE_NUM:
+        val = virtio_queue_get_num(vd, vd->queue_sel);
+        VUF_DBG("queue_num %#lx", val);
+        memcpy(conf->device, &val, 4);
+        break;
+    case VIRTIO_XENBUS_QUEUE_SEL:
+        val = vd->queue_sel;
+        VUF_DBG("queue_sel %#lx", val);
+        memcpy(conf->device, &val, 4);
+        break;
+    case VIRTIO_XENBUS_STATUS:
+        val = vd->status;
+        VUF_DBG("status %#lx", val);
+        memcpy(conf->device, &val, 1);
+        break;
+    case VIRTIO_XENBUS_ISR:
+        val = vd->isr;
+        vd->isr = 0;
+        VUF_DBG("isr %#lx", val);
+        memcpy(conf->device, &val, 1);
+        break;
+    default:
+        error_report("%s: unexpected cmd %d", __func__, cmd_code);
+        return false;
+    }
+
+    return true;
+}
+
+static bool virtio_event_write_driver(VirtioXenDevice *vxd)
+{
+    struct VirtioConfigPage *conf = vxd->conf_page;
+    VirtIODevice *vd = vxd->vd;
+
+    uint64_t val;
+    uint32_t offset = conf->offset;
+
+    switch (conf->size) {
+    case 1:
+        memcpy(&val, conf->driver + offset, 1);
+        virtio_config_writeb(vd, offset, val);
+        break;
+    case 2:
+        memcpy(&val, conf->driver + offset, 2);
+        virtio_config_writew(vd, offset, val);
+        break;
+    case 4:
+        memcpy(&val, conf->driver + offset, 4);
+        virtio_config_writel(vd, offset, val);
+        break;
+    case 8:
+        memcpy(&val, conf->driver + offset, 8);
+        virtio_config_writeq(vd, offset, val);
+        break;
+    default:
+        error_report("%s: unexpected size %u", __func__, conf->size);
+        return false;
+    }
+
+    return true;
+}
+
 static bool virtio_event_write(VirtioXenDevice *vxd)
 {
     VirtIODevice *vd = vxd->vd;
     struct VirtioConfigPage *conf = vxd->conf_page;
-    hwaddr ma;
+
     uint64_t val;
-    int size, offset;
-
-    // FIXME: Check offset does not exceed config buffer
-    offset = conf->offset;
-    size = conf->size;
-
-    switch (size) {
-    case 1:
-        val = *((uint8_t *)&conf->config[offset]);
-        break;
-    case 2:
-        val = *((uint16_t *)&conf->config[offset]);
-        break;
-    case 4:
-        val = *((uint32_t *)&conf->config[offset]);
-        break;
-    case 8:
-        val = *((uint64_t *)&conf->config[offset]);
-        break;
-    }
+    uint32_t cmd_code = conf->cmd_code;
+    pfn_desc *q;
 
     //VUF_DBG("size %d offset %d val %ld %#lx", size, offset, val, val);
 
-    if (offset < VIRTIO_XENBUS_CONFIG_OFF) {
-        switch (offset) {
-        case VIRTIO_XENBUS_STATUS:
-            VUF_DBG("status %#lx", val);
-            virtio_set_status(vd, val & 0xFF);
-            if (vd->status == 0) {
-                virtio_reset(vd); /* XXX reset should clean more? */
-            }
-            break;
-        case VIRTIO_XENBUS_GUEST_FEATURES:
-            VUF_DBG("guest_features %#lx", val);
-            vd->guest_features = val;
-            break;
-        case VIRTIO_XENBUS_QUEUE_PFN:
-            VUF_DBG("queue_pfn %#lx", val);
-             ma = (hwaddr)val << VIRTIO_XENBUS_QUEUE_ADDR_SHIFT;
-             if (ma == 0) {
-                 virtio_reset(vd);
-             } else {
-                 virtio_queue_set_addr(vd, vd->queue_sel, ma);
-             }
-             break;
-        case VIRTIO_XENBUS_QUEUE_SEL:
-            VUF_DBG("queue_sel %#lx", val);
-            if (val < VIRTIO_QUEUE_MAX) {
-                vd->queue_sel = val;
-            }
-            break;
-        case VIRTIO_XENBUS_QUEUE_NOTIFY:
-            // frontend has sent down a notification
-            VUF_DBG("queue_notify %#lx", val);
-            virtio_queue_notify(vd, val);
-            break;
-        default:
-            error_report("%s: unexpected offset %d value %ld %#lx",
-                         __func__, offset, val, val);
-            break;
+    if (cmd_code == VX_CMD_CONFIG)
+        return virtio_event_write_driver(vxd);
+
+    switch (cmd_code) {
+    case VIRTIO_XENBUS_STATUS:
+        memcpy(&val, conf->device, 1);
+        VUF_DBG("status %#lx", val);
+        virtio_set_status(vd, val & 0xFF);
+        if (vd->status == 0) {
+            virtio_reset(vd); /* XXX reset should clean more? */
         }
-    } else {
-        uint32_t off = offset - VIRTIO_XENBUS_CONFIG_OFF;
-        switch (size) {
-        case 1:
-            virtio_config_writeb(vd, off, val);
-            break;
-        case 2:
-            virtio_config_writew(vd, off, val);
-            break;
-        case 4:
-            virtio_config_writel(vd, off, val);
-            break;
-        case 8:
-            // FIXME:
-            // "2.5.1 Driver Requirements: Device Configuration Space
-            // Drivers MUST NOT assume reads from fields greater than
-            // 32 bits wide are atomic, nor are reads from
-            // multiple fields"
-            virtio_config_writel(vd, off, val);
-            virtio_config_writel(vd, off + 4, val >> 32);
-            break;
+        break;
+    case VIRTIO_XENBUS_GUEST_FEATURES:
+        memcpy(&val, conf->device, 8);
+        VUF_DBG("guest_features %#lx", val);
+        vd->guest_features = val;
+        break;
+    case VIRTIO_XENBUS_QUEUE_PFN:
+        q = (pfn_desc *)conf->device;
+        VUF_DBG("queue_pfn %#lx -> %s", q->desc,
+                q->desc == 0 ? "reset" : "virtio_queue_set_rings");
+         if (q->desc == 0) {
+             virtio_reset(vd);
+         } else {
+             virtio_queue_set_rings(vd, vd->queue_sel, q->desc,
+                                    q->avail, q->used);
+         }
+         break;
+    case VIRTIO_XENBUS_QUEUE_SEL:
+        memcpy(&val, conf->device, 4);
+        VUF_DBG("queue_sel %#lx", val);
+        if (val < VIRTIO_QUEUE_MAX) {
+            vd->queue_sel = val;
         }
+        break;
+    case VIRTIO_XENBUS_QUEUE_NOTIFY:
+        memcpy(&val, conf->device, 4);
+        // frontend has sent down a notification
+        VUF_DBG("queue_notify %#lx", val);
+        virtio_queue_notify(vd, val);
+        break;
+    default:
+        error_report("%s: unexpected cmd %d", __func__, cmd_code);
+        break;
     }
 
     return true;
@@ -577,24 +579,15 @@ static bool virtio_xen_event(void *_vxd)
 {
     VirtioXenDevice *vxd = _vxd;
     struct VirtioConfigPage *conf = vxd->conf_page;
-    uint32_t offset, size, is_write;
 
     bool ret = false;
-
-    offset = conf->offset;
-    size = conf->size;
-    is_write = conf->write;
 
     xen_mb();
 
     //VUF_DBG("event: %s size %d offset %d",
-    //        is_write ? "write" : "read", size, offset);
+    //        conf->write ? "write" : "read", size, offset);
 
-    if (size == 1 || size == 2 || size == 4 || size == 8)
-        ret = is_write ? virtio_event_write(vxd) : virtio_event_read(vxd);
-    else
-        error_report("%s: bad size %u, %s at offset %d", __func__,
-                     size, is_write ? "write" : "read", offset);
+    ret = conf->write ? virtio_event_write(vxd) : virtio_event_read(vxd);
 
     conf->be_active = 0; // break loop in [__vx_wait] of frontend
     xen_mb();
@@ -759,7 +752,7 @@ static void virtio_xen_bus_class_init(ObjectClass *klass, const void *data)
     k->load_config = virtio_xenbus_load_config;
     // k->save_queue = virtio_xenbus_save_queue;
     // k->load_queue = virtio_xenbus_load_queue;
-    // k->iommu_enabled = virtio_xenbus_iommu_enabled; // NOTE: careful with this one
+    k->iommu_enabled = virtio_xenbus_iommu_enabled; // NOTE: careful with this one
 
     // TODO: implement more of these
 

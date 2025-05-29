@@ -58,6 +58,21 @@ uint32_t virtio_config_readl(VirtIODevice *vdev, uint32_t addr)
     return val;
 }
 
+uint64_t virtio_config_readq(VirtIODevice *vdev, uint32_t addr)
+{
+    VirtioDeviceClass *k = VIRTIO_DEVICE_GET_CLASS(vdev);
+    uint64_t val;
+
+    if (addr + sizeof(val) > vdev->config_len) {
+        return (uint64_t)-1;
+    }
+
+    k->get_config(vdev, vdev->config);
+
+    val = ldq_p(vdev->config + addr);
+    return val;
+}
+
 void virtio_config_writeb(VirtIODevice *vdev, uint32_t addr, uint32_t data)
 {
     VirtioDeviceClass *k = VIRTIO_DEVICE_GET_CLASS(vdev);
@@ -100,6 +115,22 @@ void virtio_config_writel(VirtIODevice *vdev, uint32_t addr, uint32_t data)
     }
 
     stl_p(vdev->config + addr, val);
+
+    if (k->set_config) {
+        k->set_config(vdev, vdev->config);
+    }
+}
+
+void virtio_config_writeq(VirtIODevice *vdev, uint32_t addr, uint64_t data)
+{
+    VirtioDeviceClass *k = VIRTIO_DEVICE_GET_CLASS(vdev);
+    uint64_t val = data;
+
+    if (addr + sizeof(val) > vdev->config_len) {
+        return;
+    }
+
+    stq_p(vdev->config + addr, val);
 
     if (k->set_config) {
         k->set_config(vdev, vdev->config);

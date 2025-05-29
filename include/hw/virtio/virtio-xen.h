@@ -76,6 +76,7 @@
 /* The remaining space is defined by each driver as the per-driver
  * configuration space */
 #define VIRTIO_XENBUS_CONFIG_OFF           28
+#define VX_CMD_CONFIG VIRTIO_XENBUS_CONFIG_OFF
 
 /* Virtio Xenbus ABI version, this must match exactly */
 #define VIRTIO_XENBUS_ABI_VERSION          0
@@ -116,10 +117,12 @@ struct VirtioXenDeviceClass {
 
 // NOTE: must match frontend definition
 struct VirtioConfigPage {
-    uint8_t config[256];
+    uint8_t device[48];
+    uint8_t driver[256];
+    uint32_t offset;
+    uint32_t cmd_code;
     uint32_t write;
     uint32_t size;
-    uint32_t offset;
     uint32_t be_active;
 };
 

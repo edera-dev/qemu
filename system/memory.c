@@ -3044,6 +3044,7 @@ static void listener_add_address_space(MemoryListener *listener,
     FlatView *view;
     FlatRange *fr;
     MemoryRegionIoeventfd *fd;
+    printf("[INTERNAL] %s\n", __func__);
 
     if (listener->begin) {
         listener->begin(listener);
@@ -3063,9 +3064,11 @@ static void listener_add_address_space(MemoryListener *listener,
 
     view = address_space_get_flatview(as);
     FOR_EACH_FLAT_RANGE(fr, view) {
+        printf("[INTERNAL] %s       iter range\n", __func__);
         MemoryRegionSection section = section_from_flat_range(fr, view);
 
         if (listener->region_add) {
+            printf("[INTERNAL] %s       listener->region_add\n", __func__);
             listener->region_add(listener, &section);
         }
 
