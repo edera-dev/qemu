@@ -13,7 +13,12 @@ jobs:
   action:
     runs-on: ubuntu-latest
     steps:
-      - uses: dessant/repo-lockdown@v2
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - uses: dessant/repo-lockdown@0b093279a77b44bbc38e85089b5463dd06b4aea4 # v2.2.0
         with:
           pr-comment: |
             Thank you for your interest in the QEMU project.
