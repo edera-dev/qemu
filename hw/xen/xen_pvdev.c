@@ -177,16 +177,16 @@ void xen_pv_printf(struct XenLegacyDevice *xendev, int msg_level,
     FILE *logfile;
     va_list args;
 
-    if (msg_level > (xendev ? xendev->debug : debug)) {
-        return;
-    }
-
     logfile = qemu_log_trylock();
     if (logfile) {
         va_start(args, fmt);
         xen_pv_output_msg(xendev, logfile, fmt, args);
         va_end(args);
         qemu_log_unlock(logfile);
+    }
+
+    if (msg_level > (xendev ? xendev->debug : debug)) {
+        return;
     }
 
     if (msg_level == 0) {
