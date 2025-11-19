@@ -383,6 +383,14 @@ static void xen_9pfs_disconnect(struct XenLegacyDevice *xendev)
 
 static int xen_9pfs_free(struct XenLegacyDevice *xendev)
 {
+    // XXX: this is a hackfix that allows us to close the fsdev's rootfd
+    // the rootfd is closed in the cleanup function...
+    Xen9pfsDev *xen_9pdev = container_of(xendev, Xen9pfsDev, xendev);
+    V9fsState *s = &xen_9pdev->state;
+
+    if (s->ops != NULL && s->ops->cleanup != NULL)
+        s->ops->cleanup(&s->ctx);
+
     trace_xen_9pfs_free(xendev->name);
 
     return 0;
